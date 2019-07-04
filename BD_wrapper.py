@@ -14,80 +14,65 @@ class BayesianDistance(object):
 
         Parameters
         ----------
-        pathToFortran : file path to the Bayesian distance program
-            fileExtension
-        fortranScript : read in fortran script of the Bayesian distance
+        path_to_bde : file path to the Bayesian distance program
+        bde_script : read in fortran script of the Bayesian distance
             estimator
-        pathToFile : file path to weighted FITS cube containing information
+        path_to_file : file path to weighted FITS cube containing information
             about the decomposed Gaussians
-        pathToTable : file path of the astropy table which contains the
+        path_to_table : file path of the astropy table which contains the
             distance results
-        pathToInputTable : file path of a table containing information of the
+        path_to_input_table : file path of a table containing information of the
             Gaussian decompositions
-        inputTable : table containing information of the Gaussian
+        input_table : table containing information of the Gaussian
             decompositions
-        saveInputTable : The default is 'False'. If set to 'True' `inputTable`
-            is saved in the directory `pathToTable`
+        save_input_table : The default is 'False'. If set to 'True' `input_table`
+            is saved in the directory `path_to_table`
         verbose : The default is 'True'. Prints status messages to the
             terminal.
-        gpySetting : The default is 'False'. Set it to 'True' if `inputTable`
+        gpy_setting : The default is 'False'. Set it to 'True' if `input_table`
             is created from a GaussPy decomposition
-        intensityThreshold : Sets the threshold in integrated intensity of
+        intensity_threshold : Sets the threshold in integrated intensity of
             which decomposed Gaussian components should be considered. The
             default is '0.1'.
-        distanceSpacing : Only used for the creation of ppp distance cubes.
+        distance_spacing : Only used for the creation of ppp distance cubes.
             The default is '0.1' [kpc]
         """
-        self.pathToFortran = os.path.join('/disk1', 'riener',
-                                          'Bayesian_distance')
-        pathToFile = os.path.join(
-                self.pathToFortran, "Bayesian_distance_v1.0.f")
-        with open(pathToFile, "r") as fin:
-            fortranScript = fin.readlines()
-        self.fortranScript = fortranScript
-        # TODO: write exception if those tables don't exist
-        self.tableKdaInfo1 = Table.read(
-            os.path.join(self.pathToFortran, 'KDA_info_EB+15.dat'),
-            format='ascii')
-        self.tableKdaInfo2 = Table.read(
-            os.path.join(self.pathToFortran, 'KDA_info_RD+09.dat'),
-            format='ascii')
-        self.tableKdaInfo3 = Table.read(
-            os.path.join(self.pathToFortran, 'KDA_info_Urquhart+17.dat'),
-            format='ascii')
-        self.pathToFile = None
-        self.pathToTable = None
-        self.pathToInputTable = None
-        self.inputTable = None
-        self.saveInputTable = False
+        self.path_to_bde = None
+        self.path_to_file = None
+        self.path_to_table = None
+        self.path_to_input_table = None
+        self.input_table = None
+        self.save_input_table = False
         self.verbose = True
-        self.gpySetting = False
-        self.intensityThreshold = 0.1
-        self.distanceSpacing = 0.1  # in [kpc]
-        self.addKinematicDistance = True
-        self.colNameLon, self.colNameLat, self.colNameVel,\
-            self.colNameKda = (None for i in range(4))
-        self.colNrLon, self.colNrLat, self.colNrVel,\
-            self.colNrKda = (None for i in range(4))
-        self.prob_SA, self.prob_KD, self.prob_GL, self.prob_PS =\
+        self.gpy_setting = False
+        self.intensity_threshold = 0.1
+        self.distance_spacing = 0.1  # in [kpc]
+        self.add_kinematic_distance = True
+        self.colname_lon, self.colname_lat, self.colname_vel,\
+            self.colname_kda = (None for i in range(4))
+        self.colnr_lon, self.colnr_lat, self.colnr_vel,\
+            self.colnr_kda = (None for i in range(4))
+        self.prob_sa, self.prob_kd, self.prob_gl, self.prob_ps =\
             0.5, 1.0, 1.0, 0.25
+
+        self.use_ncpus = None
 
     def set_probability_controls(self):
         s = '      '
 
         cwd = os.getcwd()
-        os.chdir(self.pathToFortran)
+        os.chdir(self.path_to_bde)
 
         with open(os.path.join(
-                self.pathToFortran, 'probability_controls.inp'), 'r') as fin:
+                self.path_to_bde, 'probability_controls.inp'), 'r') as fin:
             file_content = fin.readlines()
         with open(os.path.join(
-                self.pathToFortran, 'probability_controls.inp'), 'w') as fout:
+                self.path_to_bde, 'probability_controls.inp'), 'w') as fout:
             for line in file_content:
                 if not line.startswith('!'):
                     line = '{s}{a}{s}{b}{s}{c}{s}{d}'.format(
-                        s=s, a=self.prob_SA, b=self.prob_KD, c=self.prob_GL,
-                        d=self.prob_PS)
+                        s=s, a=self.prob_sa, b=self.prob_kd, c=self.prob_gl,
+                        d=self.prob_ps)
                 fout.write(line)
         os.chdir(cwd)
 
@@ -99,12 +84,12 @@ class BayesianDistance(object):
         distance estimator with the input file of the source, then creates a
         Fortran executable file.
         """
-        with open("{}.f".format(self.pathToSource), "w") as fout:
-            for line in self.fortranScript:
+        with open("{}.f".format(self.path_to_source), "w") as fout:
+            for line in self.bde_script:
                 fout.write(line.replace('sources_info.inp',
                                         '{}_sources_info.inp'.format(source)))
         os.system('gfortran {}.f -o {}.out'.format(
-                self.pathToSource, self.pathToSource))
+                self.path_to_source, self.path_to_source))
 
     def extract_string(self, s, first, last, incl=False):
         """
@@ -207,14 +192,14 @@ class BayesianDistance(object):
         Extract the distance results from the output file ({source_name}.prt)
         of the Bayesian distance estimator tool.
         """
-        for filename in [f for f in os.listdir(self.pathToFortran)
+        for filename in [f for f in os.listdir(self.path_to_bde)
                          if f.startswith(source) and f.endswith(".prt")]:
-            with open(os.path.join(self.pathToFortran, filename), 'r') as fin:
+            with open(os.path.join(self.path_to_bde, filename), 'r') as fin:
                 result_file_content = fin.readlines()
-        for filename in [f for f in os.listdir(self.pathToFortran) if f.startswith(source)]:
-            os.remove(os.path.join(self.pathToFortran, filename))
+        for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
+            os.remove(os.path.join(self.path_to_bde, filename))
 
-        if self.addKinematicDistance:
+        if self.add_kinematic_distance:
             kinDist = self.extract_kinematic_distances(result_file_content)
         else:
             kinDist = []
@@ -227,21 +212,21 @@ class BayesianDistance(object):
         Determine the distance of an lbv data point with the Bayesian distance
         estmator tool.
         """
-        if self.gpySetting:
+        if self.gpy_setting:
             x_pos, y_pos, z_pos, intensity, lon, lat, vel = row
             source = "X{}Y{}Z{}".format(x_pos, y_pos, z_pos)
         else:
             # source, lon, lat, vel = row
             # source = "LON{}LAT{}VEL{}".format(
-            #     row[self.colNrLon], row[self.colNrLat], row[self.colNrVel])
+            #     row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel])
             source = "SRC{}".format(str(idx).zfill(9))
             lon, lat, vel =\
-                row[self.colNrLon], row[self.colNrLat], row[self.colNrVel]
+                row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel]
 
-        if self.colNrKda is not None:
-            if row[self.colNrKda] == 'F':
+        if self.colnr_kda is not None:
+            if row[self.colnr_kda] == 'F':
                 p_far = 1.0
-            elif row[self.colNrKda] == 'N':
+            elif row[self.colnr_kda] == 'N':
                 p_far = 0.0
             else:
                 p_far = 0.5
@@ -250,19 +235,19 @@ class BayesianDistance(object):
 
         inputString = "{a}\t{b}\t{c}\t{d}\t{e}\t-\n".format(
             a=source, b=lon, c=lat, d=vel, e=p_far)
-        self.pathToSource = os.path.join(self.pathToFortran, source)
-        filepath = '{}_sources_info.inp'.format(self.pathToSource)
+        self.path_to_source = os.path.join(self.path_to_bde, source)
+        filepath = '{}_sources_info.inp'.format(self.path_to_source)
         with open(filepath, 'w') as fin:
             fin.write(inputString)
 
         self.make_fortran_out(source)
         cwd = os.getcwd()
-        os.chdir(self.pathToFortran)
+        os.chdir(self.path_to_bde)
         os.system('{}.out'.format(source))
         os.chdir(cwd)
 
         rows = []
-        if self.gpySetting:
+        if self.gpy_setting:
             row = [x_pos, y_pos, z_pos, intensity, lon, lat, vel]
         # else:
         #     row = [source, lon, lat, vel]
@@ -276,7 +261,7 @@ class BayesianDistance(object):
         pFarVal = 0.5
         first = True
         found_entry = False
-        for tableKdaInfo in [self.tableKdaInfo3, self.tableKdaInfo1, self.tableKdaInfo2]:
+        for tableKdaInfo in [self.table_kda_info_3, self.table_kda_info_1, self.table_kda_info_2]:
             if not found_entry:
                 for lonMin, lonMax, latMin, latMax, velMin, velMax, kda, pFar in zip(
                         tableKdaInfo['lonMin'], tableKdaInfo['lonMax'],
@@ -296,18 +281,18 @@ class BayesianDistance(object):
         return pFarVal
 
     def determine_column_indices(self):
-        self.colNrLon = self.inputTable.colnames.index(self.colNameLon)
-        self.colNrLat = self.inputTable.colnames.index(self.colNameLat)
-        self.colNrVel = self.inputTable.colnames.index(self.colNameVel)
-        if self.colNameKda is not None:
-            self.colNrKda = self.inputTable.colnames.index(self.colNameKda)
+        self.colnr_lon = self.input_table.colnames.index(self.colname_lon)
+        self.colnr_lat = self.input_table.colnames.index(self.colname_lat)
+        self.colnr_vel = self.input_table.colnames.index(self.colname_vel)
+        if self.colname_kda is not None:
+            self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
 
     # def get_cartesian_coords(self, row):
     #     from astropy.coordinates import SkyCoord
     #     from astropy import units as u
     #
-    #     c = SkyCoord(l=row[self.colNameLon]*u.degree,
-    #                  b=row[self.colNameLat]*u.degree,
+    #     c = SkyCoord(l=row[self.colname_lon]*u.degree,
+    #                  b=row[self.colname_lat]*u.degree,
     #                  distance=row['dist']*u.kpc,
     #                  frame='galactic')
     #     c.representation = 'cartesian'
@@ -332,14 +317,14 @@ class BayesianDistance(object):
 
         return c_u, c_v, c_w
 
-    def batch_calculation(self):
+    def calculate_distances(self):
         self.check_settings()
 
         if self.verbose:
-            string = str("prob_SA: {a}\nprob_KD: {b}\n"
-                         "prob_GL: {c}\nprob_PS: {d}\n".format(
-                             a=self.prob_SA, b=self.prob_KD, c=self.prob_GL,
-                             d=self.prob_PS))
+            string = str("prob_sa: {a}\nprob_kd: {b}\n"
+                         "prob_gl: {c}\nprob_ps: {d}\n".format(
+                             a=self.prob_sa, b=self.prob_kd, c=self.prob_gl,
+                             d=self.prob_ps))
             print("setting probability controls to the following values:")
             print(string)
 
@@ -348,23 +333,17 @@ class BayesianDistance(object):
         if self.verbose:
             print('calculating Bayesian distance...')
 
-        if self.gpySetting:
+        if self.gpy_setting:
             self.create_input_table()
         else:
-            if self.inputTable is None:
-                self.inputTable = Table.read(self.pathToInputTable, format='ascii')
+            if self.input_table is None:
+                self.input_table = Table.read(
+                    self.path_to_input_table, format='ascii')
             self.determine_column_indices()
 
-        self.tableDirname = os.path.dirname(self.pathToTable)
-        self.tableFile = os.path.basename(self.pathToTable)
-        self.tableFilename, self.tableFileExtension =\
-            os.path.splitext(self.tableFile)
-        if not os.path.exists(self.tableDirname):
-            os.makedirs(self.tableDirname)
-
         import BD_wrapper.BD_multiprocessing as BD_multiprocessing
-        BD_multiprocessing.init([self, self.inputTable])
-        results_list = BD_multiprocessing.func()
+        BD_multiprocessing.init([self, self.input_table])
+        results_list = BD_multiprocessing.func(use_ncpus=self.use_ncpus)
         print('SUCCESS\n')
 
         results_list = np.array([item for sublist in results_list
@@ -373,34 +352,61 @@ class BayesianDistance(object):
         self.create_astropy_table(results_list)
 
     def initialize_data(self):
-        self.dirname = os.path.dirname(self.pathToFile)
-        self.file = os.path.basename(self.pathToFile)
+        self.dirname = os.path.dirname(self.path_to_file)
+        self.file = os.path.basename(self.path_to_file)
         self.filename, self.fileExtension = os.path.splitext(self.file)
 
-        self.tableDirname = os.path.dirname(self.pathToTable)
-        self.tableFile = os.path.basename(self.pathToTable)
-        if not os.path.exists(self.tableDirname):
-            os.makedirs(self.tableDirname)
+        self.dirname_table = os.path.dirname(self.path_to_table)
+        self.table_file = os.path.basename(self.path_to_table)
+        if not os.path.exists(self.dirname_table):
+            os.makedirs(self.dirname_table)
 
-        hdu = fits.open(self.pathToFile)[0]
+        hdu = fits.open(self.path_to_file)[0]
         self.data = hdu.data
         self.header = hdu.header
         self.shape = (self.data.shape[0], self.data.shape[1],
                       self.data.shape[2])
 
     def check_settings(self):
-        # if (self.pathToFile is None) and (self.pathToInputTable is None):
-        #     errorMessage = str("specify 'pathToFile'")
+        if self.path_to_bde is None:
+            raise Exception("Need to specify 'path_to_bde'")
+        path_to_file = os.path.join(
+                self.path_to_bde, "Bayesian_distance_v1.0.f")
+        with open(path_to_file, "r") as fin:
+            bde_script = fin.readlines()
+        self.bde_script = bde_script
+
+        # if (self.path_to_file is None) and (self.path_to_input_table is None):
+        #     errorMessage = str("specify 'path_to_file'")
         #     raise Exception(errorMessage)
 
-        if self.pathToTable is None:
-            errorMessage = str("specify 'pathToTable'")
+        if self.path_to_table is None:
+            errorMessage = str("specify 'path_to_table'")
             raise Exception(errorMessage)
+
+        dirname = os.path.dirname(os.path.realpath(__file__))
+        self.table_kda_info_1 = Table.read(
+            os.path.join(dirname, 'KDA_info', 'KDA_info_EB+15.dat'),
+            format='ascii')
+        self.table_kda_info_2 = Table.read(
+            os.path.join(dirname, 'KDA_info', 'KDA_info_RD+09.dat'),
+            format='ascii')
+        self.table_kda_info_3 = Table.read(
+            os.path.join(dirname, 'KDA_info', 'KDA_info_Urquhart+17.dat'),
+            format='ascii')
+
+        self.dirname_table = os.path.dirname(self.path_to_table)
+        if len(self.dirname_table) == 0:
+            self.dirname_table = os.getcwd()
+        self.table_file = os.path.basename(self.path_to_table)
+        self.table_filename, self.table_file_extension =\
+            os.path.splitext(self.table_file)
+        if not os.path.exists(self.dirname_table):
+            os.makedirs(self.dirname_table)
 
         text = 'Python wrapper for Bayesian distance estimator'
         border = len(text) * '='
         heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
-
         if self.verbose:
             print(heading)
 
@@ -419,7 +425,7 @@ class BayesianDistance(object):
         for (x, y, z) in itertools.product(range(self.data.shape[2]),
                                            range(self.data.shape[1]),
                                            range(self.data.shape[0])):
-            if float(self.data[z, y, x]) > self.intensityThreshold:
+            if float(self.data[z, y, x]) > self.intensity_threshold:
                 x_pos.append(x)
                 y_pos.append(y)
                 z_pos.append(z)
@@ -435,21 +441,21 @@ class BayesianDistance(object):
                 velocity.append(vel)
 
         names = ['x_pos', 'y_pos', 'z_pos', 'intensity', 'lon', 'lat', 'vel']
-        self.inputTable = Table([x_pos, y_pos, z_pos, intensity, longitude,
+        self.input_table = Table([x_pos, y_pos, z_pos, intensity, longitude,
                                  latitude, velocity], names=names)
 
-        if self.saveInputTable:
+        if self.save_input_table:
             filename = '{}_input.dat'.format(self.filename)
-            pathToTable = os.path.join(self.tableDirname, filename)
-            self.inputTable.write(pathToTable, format='ascii', overwrite=True)
+            path_to_table = os.path.join(self.dirname_table, filename)
+            self.input_table.write(path_to_table, format='ascii', overwrite=True)
             if self.verbose:
-                print(">> saved input table '{}' to {}".format(
-                        filename, self.tableDirname))
+                print(">> saved input table '{}' in {}".format(
+                        filename, self.dirname_table))
 
     def create_astropy_table(self, results):
         if self.verbose:
             print('creating Astropy table...')
-        if self.gpySetting:
+        if self.gpy_setting:
             names = ('x_pos', 'y_pos', 'z_pos', 'intensity', 'lon', 'lat',
                      'vel', 'comp', 'dist', 'e_dist', 'prob', 'arm')
             dtype = ('i4', 'i4', 'i4', 'f4', 'f4', 'f4', 'f4',
@@ -457,33 +463,33 @@ class BayesianDistance(object):
         else:
             addedColnames = ['comp', 'dist', 'e_dist', 'prob', 'arm',
                              'c_u', 'c_v', 'c_w', 'pFar']
-            if self.addKinematicDistance:
+            if self.add_kinematic_distance:
                 addedColnames += ['kDist_1', 'kDist_2']
-            names = self.inputTable.colnames + addedColnames
+            names = self.input_table.colnames + addedColnames
 
-            dtypeInputTable = []
-            for name, dtype in self.inputTable.dtype.descr:
-                dtypeInputTable.append(dtype)
+            dtypeinput_table = []
+            for name, dtype in self.input_table.dtype.descr:
+                dtypeinput_table.append(dtype)
             added_dtype = ['i4', 'f4', 'f4', 'f4', 'object',
                            'f4', 'f4', 'f4', 'f4']
-            if self.addKinematicDistance:
+            if self.add_kinematic_distance:
                 added_dtype += ['f4', 'f4']
-            dtype = dtypeInputTable + added_dtype
+            dtype = dtypeinput_table + added_dtype
 
-        self.tableResults = Table(data=results, names=names, dtype=dtype)
+        self.table_results = Table(data=results, names=names, dtype=dtype)
 
         for key in ['dist', 'e_dist', 'prob', 'c_u', 'c_v', 'c_w']:
-            if key in self.tableResults.colnames:
-                self.tableResults[key].format = "{0:.4f}"
+            if key in self.table_results.colnames:
+                self.table_results[key].format = "{0:.4f}"
         for key in ['pFar', 'kDist_1', 'kDist_2']:
-            if key in self.tableResults.colnames:
-                self.tableResults[key].format = "{0:.2f}"
+            if key in self.table_results.colnames:
+                self.table_results[key].format = "{0:.2f}"
 
         if self.verbose:
-            print(">> saved table '{}' to {}\n".format(
-                    self.tableFile, self.tableDirname))
+            print(">> saved table '{}' in {}\n".format(
+                    self.table_file, self.dirname_table))
 
-        self.tableResults.write(self.pathToTable, format='ascii',
+        self.table_results.write(self.path_to_table, format='ascii',
                                 overwrite=True)
 
     def get_table_distance_max_probability(self):
@@ -518,15 +524,14 @@ class BayesianDistance(object):
 
         remove_rows = np.array([])
 
-        for idx, component in tqdm(enumerate(self.tableResults['comp'])):
-            #  initate comps_indices for the first item in the list
+        for idx, component in tqdm(enumerate(self.table_results['comp'])):
             if idx == 0:
                 comps_indices = np.array([idx])
             else:
                 if (component == 1):
                     if comps_indices.size > 1:
                         sort_indices_highest_probability = np.argsort(
-                            self.tableResults['prob'][comps_indices])[::-1]
+                            self.table_results['prob'][comps_indices])[::-1]
                         remove = sort_indices_highest_probability[1:]
                         remove_rows = np.append(remove_rows, comps_indices[remove])
                     comps_indices = np.array([idx])
@@ -535,23 +540,23 @@ class BayesianDistance(object):
 
         #  take care of the last distance results in the list
         sort_indices_highest_probability = np.argsort(
-            self.tableResults['prob'][comps_indices])[::-1]
+            self.table_results['prob'][comps_indices])[::-1]
         remove = sort_indices_highest_probability[1:]
         remove_rows = np.append(remove_rows, comps_indices[remove])
 
         remove_rows = remove_rows.astype(int)
-        self.tableResults.remove_rows(remove_rows)
+        self.table_results.remove_rows(remove_rows)
 
-        self.tableFile = '{}{}{}'.format(self.tableFilename, '_p_max',
-                                         self.tableFileExtension)
-        self.pathToTable = os.path.join(self.tableDirname, self.tableFile)
+        self.table_file = '{}{}{}'.format(self.table_filename, '_p_max',
+                                          self.table_file_extension)
+        self.path_to_table = os.path.join(self.dirname_table, self.table_file)
 
         if self.verbose:
-            print(">> saved table '{}' to {}".format(
-                    self.tableFile, self.tableDirname))
+            print(">> saved table '{}' in {}".format(
+                    self.table_file, self.dirname_table))
 
-        self.tableResults.write(self.pathToTable, format='ascii',
-                                overwrite=True)
+        self.table_results.write(self.path_to_table, format='ascii',
+                                 overwrite=True)
 
     def find_index_max_probability(self, indices, arm=False):
         idx = [i for i in indices]
@@ -571,15 +576,15 @@ class BayesianDistance(object):
         self.check_settings()
         self.initialize_data()
 
-        self.table = Table.read(self.pathToTable, format='ascii.fixed_width')
+        self.table = Table.read(self.path_to_table, format='ascii.fixed_width')
         maxDist = int(max(self.table['dist'])) + 1
-        zrange = int(maxDist/self.distanceSpacing)
+        zrange = int(maxDist/self.distance_spacing)
         self.shape = (zrange, self.data.shape[1], self.data.shape[2])
         array = np.zeros(self.shape, dtype='float32')
         self.header['NAXIS3'] = zrange
         self.header['CRPIX3'] = 1.
-        self.header['CRVAL3'] = self.distanceSpacing
-        self.header['CDELT3'] = self.distanceSpacing
+        self.header['CRVAL3'] = self.distance_spacing
+        self.header['CDELT3'] = self.distance_spacing
         self.header['CTYPE3'] = 'DISTANCE'
         index_list = []
 
@@ -595,7 +600,7 @@ class BayesianDistance(object):
                     x = self.table['x_pos'][index]
                     y = self.table['y_pos'][index]
                     dist = round(self.table['dist'][index], 1)
-                    z = round(dist / self.distanceSpacing)
+                    z = round(dist / self.distance_spacing)
                     intensity = self.table['intensity'][index]
 
                     array[z, y, x] += intensity
@@ -605,11 +610,11 @@ class BayesianDistance(object):
                     comps_indices.append(idx)
 
         filename = '{}_distance_ppp.fits'.format(self.filename)
-        pathname = os.path.join(self.tableDirname, 'FITS')
+        pathname = os.path.join(self.dirname_table, 'FITS')
         if not os.path.exists(pathname):
             os.makedirs(pathname)
-        pathToFile = os.path.join(pathname, filename)
-        fits.writeto(pathToFile, array, self.header, overwrite=True)
+        path_to_file = os.path.join(pathname, filename)
+        fits.writeto(path_to_file, array, self.header, overwrite=True)
         if self.verbose:
             print(">> saved '{}' to {}".format(filename, pathname))
 
@@ -620,7 +625,7 @@ class BayesianDistance(object):
             self.check_settings()
             self.initialize_data()
 
-            self.table = Table.read(self.pathToTable,
+            self.table = Table.read(self.path_to_table,
                                     format='ascii.fixed_width')
             array = np.zeros(self.shape, dtype='float32')
             index_list = []
@@ -646,11 +651,11 @@ class BayesianDistance(object):
                         comps_indices.append(idx)
 
             filename = '{}_distance.fits'.format(self.filename)
-            pathname = os.path.join(self.tableDirname, 'FITS')
+            pathname = os.path.join(self.dirname_table, 'FITS')
             if not os.path.exists(pathname):
                 os.makedirs(pathname)
-            pathToFile = os.path.join(pathname, filename)
-            fits.writeto(pathToFile, array, self.header, overwrite=True)
+            path_to_file = os.path.join(pathname, filename)
+            fits.writeto(path_to_file, array, self.header, overwrite=True)
             if self.verbose:
                 print(">> saved '{}' to {}".format(filename, pathname))
 
