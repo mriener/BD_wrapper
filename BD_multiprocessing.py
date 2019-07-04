@@ -75,20 +75,21 @@ def parallel_process(array, function, n_jobs=16, use_kwargs=False, front_num=3):
     return front + out
 
 
-def func(task='determine_distance'):
+def func(task='determine_distance', use_ncpus=None):
     # Multiprocessing code
     ncpus = multiprocessing.cpu_count()
     # p = multiprocessing.Pool(ncpus, init_worker)
-    usecpus = ncpus - 10
-    print('Using {} of {} cpus'.format(usecpus, ncpus))
+    if use_ncpus is None:
+        use_ncpus = int(0.75 * ncpus)
+    print('Using {} of {} cpus'.format(use_ncpus, ncpus))
     try:
         if task is 'determine_distance':
             results_list = parallel_process(ilist, determine_distance,
-                                            n_jobs=usecpus)
+                                            n_jobs=use_ncpus)
             # results_list = p.map(determine_distance, tqdm(ilist))
         elif task is 'get_cartesian_coords':
             results_list = parallel_process(ilist, get_cartesian_coords,
-                                            n_jobs=usecpus)
+                                            n_jobs=use_ncpus)
             # results_list = p.map(get_cartesian_coords, tqdm(ilist))
     except KeyboardInterrupt:
         print("KeyboardInterrupt... quitting.")

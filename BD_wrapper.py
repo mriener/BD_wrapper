@@ -37,21 +37,7 @@ class BayesianDistance(object):
         distance_spacing : Only used for the creation of ppp distance cubes.
             The default is '0.1' [kpc]
         """
-        self.path_to_bde = os.path.join('/disk1', 'riener', 'Bayesian_distance')
-        path_to_file = os.path.join(
-                self.path_to_bde, "Bayesian_distance_v1.0.f")
-        with open(path_to_file, "r") as fin:
-            bde_script = fin.readlines()
-        self.bde_script = bde_script
-        self.table_kda_info_1 = Table.read(
-            os.path.join('KDA_info', 'KDA_info_EB+15.dat'),
-            format='ascii')
-        self.table_kda_info_2 = Table.read(
-            os.path.join('KDA_info', 'KDA_info_RD+09.dat'),
-            format='ascii')
-        self.table_kda_info_3 = Table.read(
-            os.path.join('KDA_info', 'KDA_info_Urquhart+17.dat'),
-            format='ascii')
+        self.path_to_bde = None
         self.path_to_file = None
         self.path_to_table = None
         self.path_to_input_table = None
@@ -68,6 +54,8 @@ class BayesianDistance(object):
             self.colnr_kda = (None for i in range(4))
         self.prob_sa, self.prob_kd, self.prob_gl, self.prob_ps =\
             0.5, 1.0, 1.0, 0.25
+
+        self.use_ncpus = None
 
     def set_probability_controls(self):
         s = '      '
@@ -330,7 +318,7 @@ class BayesianDistance(object):
 
         return c_u, c_v, c_w
 
-    def batch_calculation(self):
+    def calculate_distances(self):
         self.check_settings()
 
         if self.verbose:
@@ -349,19 +337,13 @@ class BayesianDistance(object):
         if self.gpy_setting:
             self.create_input_table()
         else:
-            self.input_table = Table.read(self.path_to_input_table, format='ascii')
+            self.input_table = Table.read(
+                self.path_to_input_table, format='ascii')
             self.determine_column_indices()
-
-        self.dirname_table = os.path.dirname(self.path_to_table)
-        self.table_file = os.path.basename(self.path_to_table)
-        self.table_filename, self.table_file_extension =\
-            os.path.splitext(self.table_file)
-        if not os.path.exists(self.dirname_table):
-            os.makedirs(self.dirname_table)
 
         import BD_wrapper.BD_multiprocessing as BD_multiprocessing
         BD_multiprocessing.init([self, self.input_table])
-        results_list = BD_multiprocessing.func()
+        results_list = BD_multiprocessing.func(use_ncpus=self.use_ncpus)
         print('SUCCESS\n')
 
         results_list = np.array([item for sublist in results_list
@@ -386,6 +368,14 @@ class BayesianDistance(object):
                       self.data.shape[2])
 
     def check_settings(self):
+        if self.path_to_bde is None:
+            raise Exception("Need to specify 'path_to_bde'")
+        path_to_file = os.path.join(
+                self.path_to_bde, "Bayesian_distance_v1.0.f")
+        with open(path_to_file, "r") as fin:
+            bde_script = fin.readlines()
+        self.bde_script = bde_script
+
         if (self.path_to_file is None) and (self.path_to_input_table is None):
             errorMessage = str("specify 'path_to_file'")
             raise Exception(errorMessage)
@@ -393,6 +383,26 @@ class BayesianDistance(object):
         if self.path_to_table is None:
             errorMessage = str("specify 'path_to_table'")
             raise Exception(errorMessage)
+
+        dirname = os.path.dirname(os.path.realpath(__file__))
+        self.table_kda_info_1 = Table.read(
+            os.path.join(dirname, 'KDA_info', 'KDA_info_EB+15.dat'),
+            format='ascii')
+        self.table_kda_info_2 = Table.read(
+            os.path.join(dirname, 'KDA_info', 'KDA_info_RD+09.dat'),
+            format='ascii')
+        self.table_kda_info_3 = Table.read(
+            os.path.join(dirname, 'KDA_info', 'KDA_info_Urquhart+17.dat'),
+            format='ascii')
+
+        self.dirname_table = os.path.dirname(self.path_to_table)
+        if len(self.dirname_table) == 0:
+            self.dirname_table = os.getcwd()
+        self.table_file = os.path.basename(self.path_to_table)
+        self.table_filename, self.table_file_extension =\
+            os.path.splitext(self.table_file)
+        if not os.path.exists(self.dirname_table):
+            os.makedirs(self.dirname_table)
 
         heading = str(
             '\n==============================================\n'
