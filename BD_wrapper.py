@@ -45,6 +45,7 @@ class BayesianDistance(object):
         with open(pathToFile, "r") as fin:
             fortranScript = fin.readlines()
         self.fortranScript = fortranScript
+        # TODO: write exception if those tables don't exist
         self.tableKdaInfo1 = Table.read(
             os.path.join(self.pathToFortran, 'KDA_info_EB+15.dat'),
             format='ascii')
@@ -206,13 +207,12 @@ class BayesianDistance(object):
         Extract the distance results from the output file ({source_name}.prt)
         of the Bayesian distance estimator tool.
         """
-        for dirpath, dirnames, filenames in os.walk(self.pathToFortran):
-            for filename in [f for f in filenames
-                             if f.startswith(source) and f.endswith(".prt")]:
-                with open(os.path.join(self.pathToFortran, filename), 'r') as fin:
-                    result_file_content = fin.readlines()
-            for filename in [f for f in filenames if f.startswith(source)]:
-                os.remove(os.path.join(self.pathToFortran, filename))
+        for filename in [f for f in os.listdir(self.pathToFortran)
+                         if f.startswith(source) and f.endswith(".prt")]:
+            with open(os.path.join(self.pathToFortran, filename), 'r') as fin:
+                result_file_content = fin.readlines()
+        for filename in [f for f in os.listdir(self.pathToFortran) if f.startswith(source)]:
+            os.remove(os.path.join(self.pathToFortran, filename))
 
         if self.addKinematicDistance:
             kinDist = self.extract_kinematic_distances(result_file_content)
@@ -351,7 +351,8 @@ class BayesianDistance(object):
         if self.gpySetting:
             self.create_input_table()
         else:
-            self.inputTable = Table.read(self.pathToInputTable, format='ascii')
+            if self.inputTable is None:
+                self.inputTable = Table.read(self.pathToInputTable, format='ascii')
             self.determine_column_indices()
 
         self.tableDirname = os.path.dirname(self.pathToTable)
@@ -388,18 +389,18 @@ class BayesianDistance(object):
                       self.data.shape[2])
 
     def check_settings(self):
-        if (self.pathToFile is None) and (self.pathToInputTable is None):
-            errorMessage = str("specify 'pathToFile'")
-            raise Exception(errorMessage)
+        # if (self.pathToFile is None) and (self.pathToInputTable is None):
+        #     errorMessage = str("specify 'pathToFile'")
+        #     raise Exception(errorMessage)
 
         if self.pathToTable is None:
             errorMessage = str("specify 'pathToTable'")
             raise Exception(errorMessage)
 
-        heading = str(
-            '\n==============================================\n'
-            'Python wrapper for Bayesian distance estimator\n'
-            '==============================================\n')
+        text = 'Python wrapper for Bayesian distance estimator'
+        border = len(text) * '='
+        heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
+
         if self.verbose:
             print(heading)
 
@@ -442,7 +443,7 @@ class BayesianDistance(object):
             pathToTable = os.path.join(self.tableDirname, filename)
             self.inputTable.write(pathToTable, format='ascii', overwrite=True)
             if self.verbose:
-                print("saved input table '{}' in {}".format(
+                print(">> saved input table '{}' to {}".format(
                         filename, self.tableDirname))
 
     def create_astropy_table(self, results):
@@ -479,7 +480,7 @@ class BayesianDistance(object):
                 self.tableResults[key].format = "{0:.2f}"
 
         if self.verbose:
-            print("saved table '{}' in {}\n".format(
+            print(">> saved table '{}' to {}\n".format(
                     self.tableFile, self.tableDirname))
 
         self.tableResults.write(self.pathToTable, format='ascii',
@@ -491,30 +492,54 @@ class BayesianDistance(object):
             print('creating Astropy table containing only distance result '
                   'with the highest probability...')
 
-        remove_rows = []
+        # remove_rows = []
+        #
+        # for idx, component in tqdm(enumerate(self.tableResults['comp'])):
+        #     if idx == 0:
+        #         comps_indices = [idx]
+        #     else:
+        #         if component == 1:
+        #             first_idx = True
+        #             for comps_idx in comps_indices:
+        #                 if first_idx:
+        #                     prob = self.tableResults['prob'][comps_idx]
+        #                     prob_idx = comps_idx
+        #                     first_idx = False
+        #                 else:
+        #                     if self.tableResults['prob'][comps_idx] < prob:
+        #                         remove_rows.append(comps_idx)
+        #                     else:
+        #                         remove_rows.append(prob_idx)
+        #                         prob_idx = comps_idx
+        #                         prob = self.tableResults['prob'][comps_idx]
+        #             comps_indices = [idx]
+        #         if component != 1:
+        #             comps_indices.append(idx)
+
+        remove_rows = np.array([])
 
         for idx, component in tqdm(enumerate(self.tableResults['comp'])):
+            #  initate comps_indices for the first item in the list
             if idx == 0:
-                comps_indices = [idx]
+                comps_indices = np.array([idx])
             else:
-                if component == 1:
-                    first_idx = True
-                    for comps_idx in comps_indices:
-                        if first_idx:
-                            prob = self.tableResults['prob'][comps_idx]
-                            prob_idx = comps_idx
-                            first_idx = False
-                        else:
-                            if self.tableResults['prob'][comps_idx] < prob:
-                                remove_rows.append(comps_idx)
-                            else:
-                                remove_rows.append(prob_idx)
-                                prob_idx = comps_idx
-                                prob = self.tableResults['prob'][comps_idx]
-                    comps_indices = [idx]
-                if component != 1:
-                    comps_indices.append(idx)
+                if (component == 1):
+                    if comps_indices.size > 1:
+                        sort_indices_highest_probability = np.argsort(
+                            self.tableResults['prob'][comps_indices])[::-1]
+                        remove = sort_indices_highest_probability[1:]
+                        remove_rows = np.append(remove_rows, comps_indices[remove])
+                    comps_indices = np.array([idx])
+                else:
+                    comps_indices = np.append(comps_indices, idx)
 
+        #  take care of the last distance results in the list
+        sort_indices_highest_probability = np.argsort(
+            self.tableResults['prob'][comps_indices])[::-1]
+        remove = sort_indices_highest_probability[1:]
+        remove_rows = np.append(remove_rows, comps_indices[remove])
+
+        remove_rows = remove_rows.astype(int)
         self.tableResults.remove_rows(remove_rows)
 
         self.tableFile = '{}{}{}'.format(self.tableFilename, '_p_max',
@@ -522,7 +547,7 @@ class BayesianDistance(object):
         self.pathToTable = os.path.join(self.tableDirname, self.tableFile)
 
         if self.verbose:
-            print("saved table '{}' in {}".format(
+            print(">> saved table '{}' to {}".format(
                     self.tableFile, self.tableDirname))
 
         self.tableResults.write(self.pathToTable, format='ascii',
@@ -586,7 +611,7 @@ class BayesianDistance(object):
         pathToFile = os.path.join(pathname, filename)
         fits.writeto(pathToFile, array, self.header, overwrite=True)
         if self.verbose:
-            print("saved '{}' in {}".format(filename, pathname))
+            print(">> saved '{}' to {}".format(filename, pathname))
 
         def make_ppv_distance_cube(self):
             if self.verbose:
@@ -627,7 +652,7 @@ class BayesianDistance(object):
             pathToFile = os.path.join(pathname, filename)
             fits.writeto(pathToFile, array, self.header, overwrite=True)
             if self.verbose:
-                print("saved '{}' in {}".format(filename, pathname))
+                print(">> saved '{}' to {}".format(filename, pathname))
 
     def timer(self, mode='start', start_time=None):
         """"""
