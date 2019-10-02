@@ -1,0 +1,4 @@
+!  Source         Long    Lat   Vlsr   P(far) Extra
+!                (deg)   (deg) (km/s)
+G019.60-00.23    19.60  -0.23   47.0   0.5    Example-1
+G136.84+01.12   136.84   1.12  -45.0   0.5    Example-2   

@@ -1,0 +1,85 @@
+ Program: Bayesian_distance_pdf: April 5, 2016
+
+ Reading in file "probability_controls.inp                        "
+ Max Prob_SA = 0.50
+ Max Prob_KD = 1.00
+ Max Prob_GL = 1.00
+ Max Prob_PS = 0.25
+
+
+ Openning input ascii file "galaxy_data_Univ.inp            "
+ Comment lines follow:
+ ! Galactic and Solar Motion parameters                                          
+ ! for use with Persic "Universal" rotation curve                                
+ End of Comment lines
+
+ Galaxy model:
+  Ro, a1, a2, a3:                         8.34   241.000     0.900     1.460
+  Solar Motion (Uo,Vo,Wo):               10.27     15.32      7.74
+  Source Peculiar Motion (Us,Vs,Ws):      0.00      0.00      0.00
+
+ Getting Spiral arm segment data:
+ 
+  Read file Out_lbvRBD.dat       containing 182 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    0.0 to  182.7 deg.
+  Read file Per_lbvRBD.dat       containing 253 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    0.0 to  250.0 deg.
+  Read file Loc_lbvRBD.dat       containing 173 (l,b,v,R,beta,D) values.
+       Spanning longitude range:   68.0 to  250.0 deg.
+  Read file CrN_lbvRBD.dat       containing  59 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  302.0 to  359.5 deg.
+  Read file CrF_lbvRBD.dat       containing  68 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  282.0 to  331.0 deg.
+  Read file SgN_lbvRBD.dat       containing  52 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    0.0 to   50.6 deg.
+  Read file SgF_lbvRBD.dat       containing  52 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    0.0 to   50.8 deg.
+  Read file CtN_lbvRBD.dat       containing  52 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  309.0 to  359.5 deg.
+  Read file CtF_lbvRBD.dat       containing  19 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  309.0 to  327.0 deg.
+  Read file ScN_lbvRBD.dat       containing  34 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    0.0 to   32.8 deg.
+  Read file ScF_lbvRBD.dat       containing  47 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    3.0 to   32.8 deg.
+  Read file OSC_lbvRBD.dat       containing 150 (l,b,v,R,beta,D) values.
+       Spanning longitude range:   15.0 to  164.0 deg.
+  Read file Nor_lbvRBD.dat       containing  72 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  328.0 to  359.0 deg.
+            and longitude range:    0.0 to   23.2 deg.
+  Read file 3kN_lbvRBD.dat       containing  34 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  340.0 to  359.0 deg.
+            and longitude range:    0.1 to   13.0 deg.
+  Read file 3kF_lbvRBD.dat       containing  26 (l,b,v,R,beta,D) values.
+       Spanning longitude range:  348.0 to  359.0 deg.
+            and longitude range:    0.1 to   13.0 deg.
+  Read file AqS_lbvRBD.dat       containing  13 (l,b,v,R,beta,D) values.
+       Spanning longitude range:   34.6 to   40.3 deg.
+  Read file CnN_lbvRBD.dat       containing  10 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    2.0 to   11.0 deg.
+  Read file CnX_lbvRBD.dat       containing   4 (l,b,v,R,beta,D) values.
+       Spanning longitude range:    8.0 to   11.0 deg.
+  Read file AqR_lbvRBD.dat       containing  26 (l,b,v,R,beta,D) values.
+       Spanning longitude range:   17.0 to   42.0 deg.
+  Read file LoS_lbvRBD.dat       containing  28 (l,b,v,R,beta,D) values.
+       Spanning longitude range:   53.0 to   80.0 deg.
+
+ Openning input ascii file "parallax_data.inp               "
+ Comment lines follow:
+ ! Source        Arm    Long. (deg) Lat.    Vlsr (kms) +/-    Parallax (mas) +/- 
+ End of Comment lines
+
+  Read in 142 sources with measured parallaxes
+
+ Openning input ascii file "sources_info.inp                "
+ Comment lines follow:
+ !  Source         Long    Lat   Vlsr   P(far) Extra                             
+ !                (deg)   (deg) (km/s)                                           
+ End of Comment lines
+
+
+   Long    Lat   Vlsr       Dist  sigma-D   Prob     Arm     Extra Information
+  (deg)   (deg) (km/s)     (kpc)   (kpc)
+
+  19.60  -0.23   47.0       3.38    0.18    0.95     ScN     Example-1           
+ 136.84   1.12  -45.0       1.96    0.04    0.79     Per     Example-2           

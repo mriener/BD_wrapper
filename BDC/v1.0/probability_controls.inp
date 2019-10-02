@@ -1,0 +1,3 @@
+!  Set four weighting parameters for individual Prob(d) terms 
+!  Prob_SA   Prob_KD   Prob_GL   Prob_PS
+      0.5      1.0      1.0      0.25

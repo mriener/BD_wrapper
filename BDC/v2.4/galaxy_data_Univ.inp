@@ -1,0 +1,13 @@
+! Galactic and Solar Motion parameters
+! for use with 2-parameter Persic "Universal" rotation curve
+  8.15        ! Ro (kpc)
+236.0         ! a1 (km/s)   Univ rotation curve parameters 
+  0.96  1.62  ! a2, a3 
+ 10.6         ! Solar Motion Uo toward G.C. (km/s)
+ 10.7         ! Solar Motion Vo toward Galactic rotation (km/s)
+  7.6         ! Solar Motion Wo toward North Gal. Pole (km/s)
+  0.0         ! Source peculiar motion Us toward G.C. (km/s) 
+  0.0         ! Source peculiar motion Vs toward Galactic rotation (km/s)
+  0.0         ! Source peculiar motion Ws toard North Gal. Pole (km/s)
+-360.0        ! Minimum Galactic longitude to consider
+ 360.0        ! Maximum    "         "      "    "

@@ -38,6 +38,7 @@ class BayesianDistance(object):
             The default is '0.1' [kpc]
         """
         self.path_to_bde = None
+        self.version = '2.4'
         self.path_to_file = None
         self.path_to_table = None
         self.path_to_input_table = None
@@ -52,13 +53,25 @@ class BayesianDistance(object):
             self.colname_kda = (None for i in range(4))
         self.colnr_lon, self.colnr_lat, self.colnr_vel,\
             self.colnr_kda = (None for i in range(4))
-        self.prob_sa, self.prob_kd, self.prob_gl, self.prob_ps =\
-            0.5, 1.0, 1.0, 0.25
+        self.prob_sa, self.prob_kd, self.prob_gl, self.prob_ps, self.prob_pm =\
+            (None for _ in range(5))
 
         self.use_ncpus = None
 
     def set_probability_controls(self):
         s = '      '
+
+        default_vals = {
+            '1.0': {'SA': 0.5, 'KD': 1.0, 'GL': 1.0, 'PS': 0.25, 'PM': None},
+            '2.4': {'SA': 0.85, 'KD': 0.85, 'GL': 0.85, 'PS': 0.15, 'PM': 0.85}
+            }
+
+        if self.prob_sa is None:
+            self.prob_sa = default_vals[self.version]['SA']
+            self.prob_kd = default_vals[self.version]['KD']
+            self.prob_gl = default_vals[self.version]['GL']
+            self.prob_ps = default_vals[self.version]['PS']
+            self.prob_pm = default_vals[self.version]['PM']
 
         cwd = os.getcwd()
         os.chdir(self.path_to_bde)
@@ -73,6 +86,8 @@ class BayesianDistance(object):
                     line = '{s}{a}{s}{b}{s}{c}{s}{d}'.format(
                         s=s, a=self.prob_sa, b=self.prob_kd, c=self.prob_gl,
                         d=self.prob_ps)
+                    if self.prob_pm is not None:
+                        line += '{s}{a}'.format(s=s, a=self.prob_pm)
                 fout.write(line)
         os.chdir(cwd)
 
@@ -196,8 +211,8 @@ class BayesianDistance(object):
                          if f.startswith(source) and f.endswith(".prt")]:
             with open(os.path.join(self.path_to_bde, filename), 'r') as fin:
                 result_file_content = fin.readlines()
-        for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-            os.remove(os.path.join(self.path_to_bde, filename))
+        # for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
+        #     os.remove(os.path.join(self.path_to_bde, filename))
 
         if self.add_kinematic_distance:
             kinDist = self.extract_kinematic_distances(result_file_content)
@@ -233,8 +248,13 @@ class BayesianDistance(object):
         else:
             p_far = self.check_KDA(lon, lat, vel)
 
-        inputString = "{a}\t{b}\t{c}\t{d}\t{e}\t-\n".format(
-            a=source, b=lon, c=lat, d=vel, e=p_far)
+        if self.version == '1.0':
+            plusminus = ''
+        elif self.version == '2.4':
+            plusminus = '5.0\t'
+
+        inputString = "{a}\t{b}\t{c}\t{d}\t{e}{f}\t-\n".format(
+            a=source, b=lon, c=lat, d=vel, e=plusminus, f=p_far)
         self.path_to_source = os.path.join(self.path_to_bde, source)
         filepath = '{}_sources_info.inp'.format(self.path_to_source)
         with open(filepath, 'w') as fin:
@@ -320,6 +340,8 @@ class BayesianDistance(object):
     def calculate_distances(self):
         self.check_settings()
 
+        self.set_probability_controls()
+
         if self.verbose:
             string = str("prob_sa: {a}\nprob_kd: {b}\n"
                          "prob_gl: {c}\nprob_ps: {d}\n".format(
@@ -327,8 +349,6 @@ class BayesianDistance(object):
                              d=self.prob_ps))
             print("setting probability controls to the following values:")
             print(string)
-
-        self.set_probability_controls()
 
         if self.verbose:
             print('calculating Bayesian distance...')
@@ -368,13 +388,28 @@ class BayesianDistance(object):
                       self.data.shape[2])
 
     def check_settings(self):
-        if self.path_to_bde is None:
-            raise Exception("Need to specify 'path_to_bde'")
-        path_to_file = os.path.join(
-                self.path_to_bde, "Bayesian_distance_v1.0.f")
-        if not os.path.exists(path_to_file):
+        if (self.path_to_bde is None) and (self.version is None):
+            raise Exception("Need to specify 'path_to_bde' or 'version'")
+
+        path_script = os.path.dirname(os.path.realpath(__file__))
+
+        if self.version is None:
             path_to_file = os.path.join(
-                    self.path_to_bde, "Bayesian_distance_2019_fromlist_v2.4.f")
+                    self.path_to_bde, "Bayesian_distance_v1.0.f")
+            if not os.path.exists(path_to_file):
+                path_to_file = os.path.join(
+                        self.path_to_bde, "Bayesian_distance_2019_fromlist_v2.4.f")
+            self.version = self.extract_string(
+                os.path.basename(path_to_file), '_v', '.f')
+        elif self.version == '2.4':
+            self.path_to_bde = os.path.join(path_script, 'BDC', 'v2.4')
+            path_to_file = os.path.join(
+                self.path_to_bde, 'Bayesian_distance_2019_fromlist_v2.4.f')
+        elif self.version == '1.0':
+            self.path_to_bde = os.path.join(path_script, 'BDC', 'v1.0')
+            path_to_file = os.path.join(
+                self.path_to_bde, 'Bayesian_distance_v1.0.f')
+
         with open(path_to_file, "r") as fin:
             bde_script = fin.readlines()
         self.bde_script = bde_script
