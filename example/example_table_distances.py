@@ -8,10 +8,10 @@ suffix = ''  # '_KD+GL'  # '_p_PS_zero'
 
 b = bdw.BayesianDistance()
 #  specify the path to the Bayesian Distance Estimator executable files
-b.path_to_bde = '/disk1/riener/Bayesian_distance'
+b.path_to_bde = '/Users/riener/Projects/Programs/Bayesian_distance_v1.0'
 
 #  specify number of CPUs used for multiprocessing
-b.use_ncpus = 30
+b.use_ncpus = 3
 
 #  specify the column names of the Galactic Longitude, Galactic Latitude and VLSR values. If there are no column names, this can also be specified in terms of the column number, i.e. colnr_lon = 0, colnr_lat = 1, etc.
 b.colname_lon = 'GLON'

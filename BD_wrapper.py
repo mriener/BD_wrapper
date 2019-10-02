@@ -372,6 +372,9 @@ class BayesianDistance(object):
             raise Exception("Need to specify 'path_to_bde'")
         path_to_file = os.path.join(
                 self.path_to_bde, "Bayesian_distance_v1.0.f")
+        if not os.path.exists(path_to_file):
+            path_to_file = os.path.join(
+                    self.path_to_bde, "Bayesian_distance_2019_fromlist_v2.4.f")
         with open(path_to_file, "r") as fin:
             bde_script = fin.readlines()
         self.bde_script = bde_script
