@@ -209,8 +209,23 @@ c     Get source information from one file (one line per source)...
       sources_file = 'sources_info.inp'
       call open_ascii_file ( lu_sources, sources_file, lu_print )
 
+      ieof = 0
+      do while ( ieof .ge. 0 )
+
+c      Check for "commented-out" source line (ie, starting with a "!")
+       read (lu_sources,*,iostat=ieof) s1
+
+       if ( s1.ne.'!' .and. ieof.ge.0 ) then
+
+         backspace (unit=lu_sources)
+         read (lu_sources,*) src, coord1, coord2, v_lsr, v_lsr_unc,
+     +                       far_prob
+
 c     Open summary output file...
-      summary_file = 'summary.prt'
+c        Strip blanks out of source name in output file naming
+      call strip_blanks_14 ( src, stripped_src, nch_src )
+      write (summary_file,1180) stripped_src(1:nch_src)
+ 1180 format(a,'_summary.prt')
       open ( unit=lu_summary, file=summary_file )
 c     Document summary output
       write (lu_summary,1100)
@@ -224,18 +239,6 @@ c     Document summary output
      +       '(kpc)       Probability          ',
      +       '(kpc)       Probability          ')
 cc      write (lu_print,1100)
-
-      ieof = 0
-      do while ( ieof .ge. 0 )
-
-c      Check for "commented-out" source line (ie, starting with a "!")
-       read (lu_sources,*,iostat=ieof) s1
-
-       if ( s1.ne.'!' .and. ieof.ge.0 ) then
-
-         backspace (unit=lu_sources)
-         read (lu_sources,*) src, coord1, coord2, v_lsr, v_lsr_unc,
-     +                       far_prob
 
 c        Set source characteristics that are not entered in this version
 c        (ie, assume proper motions are not measured)
