@@ -17,6 +17,7 @@ b.use_ncpus = 3
 b.colname_lon = 'GLON'
 b.colname_lat = 'GLAT'
 b.colname_vel = 'Vlsr'
+b.kda_info_tables = ['Roman-Duval+09']
 # b.colname_kda = 'KDA'
 
 #  set weight for spiral arm prior (default: 0.5)

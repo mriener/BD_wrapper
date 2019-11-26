@@ -316,7 +316,7 @@ class BayesianDistance(object):
         self.make_fortran_out(source)
         cwd = os.getcwd()
         os.chdir(self.path_to_bde)
-        os.system('{}.out'.format(source))
+        os.system('./{}.out'.format(source))
         os.chdir(cwd)
 
     def bdc_calculation_ok(self, source):
