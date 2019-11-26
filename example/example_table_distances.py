@@ -7,8 +7,8 @@ table_name = 'Roman-Duval+09-GRS'
 suffix = ''  # '_KD+GL'  # '_p_PS_zero'
 
 b = bdw.BayesianDistance()
-#  specify the path to the Bayesian Distance Estimator executable files
-b.path_to_bde = '/Users/riener/Projects/Programs/Bayesian_distance_v1.0'
+
+b.version = '2.4'
 
 #  specify number of CPUs used for multiprocessing
 b.use_ncpus = 3
@@ -17,7 +17,7 @@ b.use_ncpus = 3
 b.colname_lon = 'GLON'
 b.colname_lat = 'GLAT'
 b.colname_vel = 'Vlsr'
-b.kda_info_tables = ['Roman-Duval+09']
+b.kda_info_tables = ['Urquhart+18', 'Roman-Duval+09']
 # b.colname_kda = 'KDA'
 
 #  set weight for spiral arm prior (default: 0.5)
@@ -30,7 +30,8 @@ b.kda_info_tables = ['Roman-Duval+09']
 # b.prob_kd = 0.0
 
 b.path_to_input_table = '{}.dat'.format(table_name)
-b.path_to_table = '{}_distance_results{}.dat'.format(table_name, suffix)
+b.path_to_output_table = '{}_distance_results{}.dat'.format(table_name, suffix)
+b.table_format = 'ascii'
 
 b.calculate_distances()
 b.get_table_distance_max_probability()

@@ -43,8 +43,8 @@ class BayesianDistance(object):
         self.path_to_bde = None
         self.version = '2.4'
         self.path_to_file = None
-        self.path_to_table = None
         self.path_to_input_table = None
+        self.path_to_output_table = None
         self.input_table = None
         self.save_input_table = False
         self.verbose = True
@@ -66,6 +66,11 @@ class BayesianDistance(object):
                                 'Roman-Duval+09']
 
         self.use_ncpus = None
+
+        self._kda_info_tables_ref = {
+            'Urquhart+18': 'U+18',
+            'Ellsworth-Bowers+15': 'EB+15',
+            'Roman-Duval+09': 'RD+09'}
 
         self._p = {
             '1.0': {
@@ -181,7 +186,7 @@ class BayesianDistance(object):
         return [comp, dist, err, prob, arm, c_u, c_v, c_w, p_far]
 
     def extract_results_v1p0(self, input_file_content, result_file_content,
-                             kin_dist=None):
+                             kin_dist=None, kda_ref=None):
         """
         Loop through the lines of the output file of the Bayesian distance
         estimator tool and search for the distance results.
@@ -204,6 +209,9 @@ class BayesianDistance(object):
             searchString = 'Probability component'
             if searchString in line:
                 result = self.extract_probability_info(line, lon, lat, p_far)
+
+                if kda_ref is not None:
+                    result += [kda_ref]
 
                 if kin_dist is not None:
                     result += kin_dist
@@ -236,7 +244,7 @@ class BayesianDistance(object):
         return float(line)
 
     def extract_results_v2p4(self, input_file_content, result_file_content,
-                             kin_dist=None):
+                             kin_dist=None, kda_ref=None):
         for line in input_file_content:
             if line.startswith('!'):
                 continue
@@ -262,13 +270,16 @@ class BayesianDistance(object):
 
                 result = [comp, dist, e_dist, prob, arm, c_u, c_v, c_w, p_far]
 
+                if kda_ref is not None:
+                    result += [kda_ref]
+
                 if kin_dist is not None:
                     result += kin_dist
 
                 results.append(result)
         return results
 
-    def get_results(self, source):
+    def get_results(self, source, kda_ref):
         """
         Extract the distance results from the output file ({source_name}.prt)
         of the Bayesian distance estimator tool.
@@ -299,7 +310,7 @@ class BayesianDistance(object):
             os.remove(os.path.join(self.path_to_bde, filename))
 
         results = self._p[self.version]['fct_extract'](
-            input_file_content, result_file_content, kin_dist=kinDist)
+            input_file_content, result_file_content, kin_dist=kinDist, kda_ref=kda_ref)
 
         # if self.version == '1.0':
         #     results = self.extract_results_v1p0(result_file_content, kinDist)
@@ -356,6 +367,7 @@ class BayesianDistance(object):
                     e_vel = None
 
         p_far = 0.5
+        kda_ref = None
 
         if self.colnr_kda is not None:
             if row[self.colnr_kda] == 'F':
@@ -363,7 +375,7 @@ class BayesianDistance(object):
             elif row[self.colnr_kda] == 'N':
                 p_far = 0.0
         elif self.check_for_kda_solutions:
-            p_far = self.check_KDA(lon, lat, vel)
+            p_far, kda_ref = self.check_KDA(lon, lat, vel)
 
         if self.version == '1.0':
             plusminus = ''
@@ -394,7 +406,7 @@ class BayesianDistance(object):
             row = [x_pos, y_pos, z_pos, intensity, lon, lat, vel]
         # else:
         #     row = [source, lon, lat, vel]
-        results = self.get_results(source)
+        results = self.get_results(source, kda_ref)
         for result in results:
             rows.append(row + result)
 
@@ -402,7 +414,8 @@ class BayesianDistance(object):
 
     def check_KDA(self, lon, lat, vel):
         p_far = 0.5
-        for table in self.kda_tables:
+        ref = '--'
+        for table, table_ref in zip(self._kda_tables, self._kda_tables_ref):
             lon_min, lon_max = table['lonMin'].data, table['lonMax'].data
             lat_min, lat_max = table['latMin'].data, table['latMax'].data
             vel_min, vel_max = table['velMin'].data, table['velMax'].data
@@ -418,12 +431,14 @@ class BayesianDistance(object):
                 continue
             elif n_values == 1:
                 p_far = table['pFar'][indices].data
+                ref = table_ref
                 break
             else:
                 p_far = sum(table['pFar'][indices].data) / n_values
+                ref = table_ref
                 break
 
-        return round(float(p_far), 2)
+        return round(float(p_far), 2), ref
 
     def determine_column_indices(self):
         self.colnr_lon = self.input_table.colnames.index(self.colname_lon)
@@ -433,21 +448,6 @@ class BayesianDistance(object):
             self.colnr_e_vel = self.input_table.colnames.index(self.colname_e_vel)
         if self.colname_kda is not None:
             self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
-
-    # def get_cartesian_coords(self, row):
-    #     from astropy.coordinates import SkyCoord
-    #     from astropy import units as u
-    #
-    #     c = SkyCoord(l=row[self.colname_lon]*u.degree,
-    #                  b=row[self.colname_lat]*u.degree,
-    #                  distance=row['dist']*u.kpc,
-    #                  frame='galactic')
-    #     c.representation = 'cartesian'
-    #     c_u = round(c.u.value, 4)
-    #     c_v = round(c.v.value, 4)
-    #     c_w = round(c.w.value, 4)
-    #
-    #     return [c_u, c_v, c_w]
 
     def get_cartesian_coords(self, lon, lat, dist):
         from astropy.coordinates import SkyCoord
@@ -553,17 +553,23 @@ class BayesianDistance(object):
             bde_script = fin.readlines()
         self.bde_script = bde_script
 
+        if self.path_to_output_table is not None:
+            self.path_to_table = self.path_to_output_table
+
         if self.path_to_table is None:
             errorMessage = str("specify 'path_to_table'")
             raise Exception(errorMessage)
 
         dirname = os.path.dirname(os.path.realpath(__file__))
-        self.kda_tables = []
+        self._kda_tables, self._kda_tables_ref = [], []
         for tablename in self.kda_info_tables:
-            self.kda_tables.append(
+            self._kda_tables.append(
                 Table.read(
                     os.path.join(dirname, 'KDA_info', tablename + '.dat'),
                     format='ascii')
+            )
+            self._kda_tables_ref.append(
+                self._kda_info_tables_ref[tablename]
             )
 
         self.dirname_table = os.path.dirname(self.path_to_table)
@@ -629,19 +635,22 @@ class BayesianDistance(object):
             dtype = ('i4', 'i4', 'i4', 'f4', 'f4', 'f4', 'f4',
                      'i4', 'f4', 'f4', 'f4', 'object')
         else:
-            addedColnames = ['comp', 'dist', 'e_dist', 'prob', 'arm',
-                             'c_u', 'c_v', 'c_w', 'p_far']
-            if self.add_kinematic_distance:
-                addedColnames += ['kDist_1', 'kDist_2']
-            names = self.input_table.colnames + addedColnames
+            added_colnames = ['comp', 'dist', 'e_dist', 'prob', 'arm',
+                              'c_u', 'c_v', 'c_w', 'p_far']
 
             dtypeinput_table = []
             for name, dtype in self.input_table.dtype.descr:
                 dtypeinput_table.append(dtype)
             added_dtype = ['i4', 'f4', 'f4', 'f4', 'object',
                            'f4', 'f4', 'f4', 'f4']
+
+            if self.check_for_kda_solutions:
+                added_colnames += ['KDA_ref']
+                added_dtype += ['object']
             if self.add_kinematic_distance:
+                added_colnames += ['kDist_1', 'kDist_2']
                 added_dtype += ['f4', 'f4']
+            names = self.input_table.colnames + added_colnames
             dtype = dtypeinput_table + added_dtype
 
         self.table_results = Table(data=results, names=names, dtype=dtype)
@@ -772,44 +781,44 @@ class BayesianDistance(object):
         fits.writeto(path_to_file, array, self.header, overwrite=True)
         self.say(">> saved '{}' to {}".format(filename, pathname))
 
-        def make_ppv_distance_cube(self):
-            self.say('create PPV distance cube...')
+    def make_ppv_distance_cube(self):
+        self.say('create PPV distance cube...')
 
-            self.check_settings()
-            self.initialize_data()
+        self.check_settings()
+        self.initialize_data()
 
-            self.table = Table.read(self.path_to_table,
-                                    format='ascii.fixed_width')
-            array = np.zeros(self.shape, dtype='float32')
-            index_list = []
+        self.table = Table.read(self.path_to_table,
+                                format='ascii.fixed_width')
+        array = np.zeros(self.shape, dtype='float32')
+        index_list = []
 
-            for idx, (component, probability) in enumerate(
-                    zip(self.table['comp'], self.table['dist'])):
-                if idx == 0:
+        for idx, (component, probability) in enumerate(
+                zip(self.table['comp'], self.table['dist'])):
+            if idx == 0:
+                comps_indices = [idx]
+            else:
+                if component == 1:
+                    index = self.find_index_max_probability(comps_indices)
+                    index_list.append(index)
+
+                    x = self.table['x_pos'][index]
+                    y = self.table['y_pos'][index]
+                    z = self.table['z_pos'][index]
+                    dist = self.table['dist'][index]
+
+                    array[z, y, x] = dist
+
                     comps_indices = [idx]
-                else:
-                    if component == 1:
-                        index = self.find_index_max_probability(comps_indices)
-                        index_list.append(index)
+                if component != 1:
+                    comps_indices.append(idx)
 
-                        x = self.table['x_pos'][index]
-                        y = self.table['y_pos'][index]
-                        z = self.table['z_pos'][index]
-                        dist = self.table['dist'][index]
-
-                        array[z, y, x] = dist
-
-                        comps_indices = [idx]
-                    if component != 1:
-                        comps_indices.append(idx)
-
-            filename = '{}_distance.fits'.format(self.filename)
-            pathname = os.path.join(self.dirname_table, 'FITS')
-            if not os.path.exists(pathname):
-                os.makedirs(pathname)
-            path_to_file = os.path.join(pathname, filename)
-            fits.writeto(path_to_file, array, self.header, overwrite=True)
-            self.say(">> saved '{}' to {}".format(filename, pathname))
+        filename = '{}_distance.fits'.format(self.filename)
+        pathname = os.path.join(self.dirname_table, 'FITS')
+        if not os.path.exists(pathname):
+            os.makedirs(pathname)
+        path_to_file = os.path.join(pathname, filename)
+        fits.writeto(path_to_file, array, self.header, overwrite=True)
+        self.say(">> saved '{}' to {}".format(filename, pathname))
 
     def timer(self, mode='start', start_time=None):
         """"""
