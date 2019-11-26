@@ -62,6 +62,8 @@ class BayesianDistance(object):
         self.table_format = 'ascii'
         self.save_temporary_files = False
         self.default_e_vel = 5.0
+        self.kda_info_tables = ['Urquhart+18', 'Ellsworth-Bowers+15',
+                                'Roman-Duval+09']
 
         self.use_ncpus = None
 
@@ -400,7 +402,7 @@ class BayesianDistance(object):
 
     def check_KDA(self, lon, lat, vel):
         p_far = 0.5
-        for table in [self.table_kda_info_3, self.table_kda_info_1, self.table_kda_info_2]:
+        for table in self.kda_tables:
             lon_min, lon_max = table['lonMin'].data, table['lonMax'].data
             lat_min, lat_max = table['latMin'].data, table['latMax'].data
             vel_min, vel_max = table['velMin'].data, table['velMax'].data
@@ -556,15 +558,13 @@ class BayesianDistance(object):
             raise Exception(errorMessage)
 
         dirname = os.path.dirname(os.path.realpath(__file__))
-        self.table_kda_info_1 = Table.read(
-            os.path.join(dirname, 'KDA_info', 'KDA_info_EB+15.dat'),
-            format='ascii')
-        self.table_kda_info_2 = Table.read(
-            os.path.join(dirname, 'KDA_info', 'KDA_info_RD+09.dat'),
-            format='ascii')
-        self.table_kda_info_3 = Table.read(
-            os.path.join(dirname, 'KDA_info', 'KDA_info_Urquhart+17.dat'),
-            format='ascii')
+        self.kda_tables = []
+        for tablename in self.kda_info_tables:
+            self.kda_tables.append(
+                Table.read(
+                    os.path.join(dirname, 'KDA_info', tablename + '.dat'),
+                    format='ascii')
+            )
 
         self.dirname_table = os.path.dirname(self.path_to_table)
         if len(self.dirname_table) == 0:
