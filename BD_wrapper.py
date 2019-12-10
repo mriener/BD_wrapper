@@ -66,11 +66,7 @@ class BayesianDistance(object):
                                 'Roman-Duval+09']
 
         self.use_ncpus = None
-
-        self._kda_info_tables_ref = {
-            'Urquhart+18': 'U+18',
-            'Ellsworth-Bowers+15': 'EB+15',
-            'Roman-Duval+09': 'RD+09'}
+        self.plot_probability = False
 
         self._p = {
             '1.0': {
@@ -305,12 +301,16 @@ class BayesianDistance(object):
         else:
             kinDist = None
 
-        #  TESTING:
-        for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-            os.remove(os.path.join(self.path_to_bde, filename))
-
         results = self._p[self.version]['fct_extract'](
             input_file_content, result_file_content, kin_dist=kinDist, kda_ref=kda_ref)
+
+        if self.plot_probability:
+            self.plot_probability_density(source, results)
+
+        #  remove for TESTING:
+        if not self.save_temporary_files:
+            for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
+                os.remove(os.path.join(self.path_to_bde, filename))
 
         # if self.version == '1.0':
         #     results = self.extract_results_v1p0(result_file_content, kinDist)
@@ -374,6 +374,8 @@ class BayesianDistance(object):
                 p_far = 1.0
             elif row[self.colnr_kda] == 'N':
                 p_far = 0.0
+            elif isinstance(row[self.colnr_kda], float):
+                p_far = row[self.colnr_kda]
         elif self.check_for_kda_solutions:
             p_far, kda_ref = self.check_KDA(lon, lat, vel)
 
@@ -412,30 +414,90 @@ class BayesianDistance(object):
 
         return rows
 
+    def get_values_from_init_file(self, init_file):
+        """Read in values from init file.
+
+        """
+        import ast
+        import configparser
+        config = configparser.ConfigParser()
+        config.read(init_file)
+
+        for key, value in config['DEFAULT'].items():
+            try:
+                setattr(self, '_' + key, ast.literal_eval(value))
+            except ValueError:
+                raise Exception('Could not parse parameter {} from config file'.format(key))
+
+    def point_in_ellipse(self, table, lon, lat):
+        cos_pa = table['cos_pa'].data.data
+        sin_pa = table['sin_pa'].data.data
+        glon = table['GLON'].data.data
+        glat = table['GLAT'].data.data
+        aa = table['aa'].data.data
+        bb = table['bb'].data.data
+
+        a = (cos_pa * (lon - glon) + sin_pa * (lat - glat))**2
+        b = (sin_pa * (lon - glon) - cos_pa * (lat - glat))**2
+        ellipse = (a / aa) + (b / bb)
+        ellipse[ellipse < 1] = 1
+        weight = 1 / ellipse
+
+        return weight >= self._threshold_spatial, weight
+
+    def get_weight_velocity(self, table, vel):
+        """Calculate the weight for the velocity association.
+
+        Gaussian function: amp * np.exp(-4. * np.log(2) * (x-mean)**2 / fwhm**2)
+        mean = 0
+        Conversion factor std to FWHM = 2.354820045
+
+        Renormalization factor for amplitude, so that Gaussian function is 1 at the standard deviation; scale = 1 / (np.exp(-4. * np.log(2) / (2.354820045)**2)) = 1.6487212707217973
+
+        """
+        normalized_amp = 1.6487212707217973
+        fwhm_factor = 2.354820045
+
+        vlsr = table['VLSR'].data.data
+        dvlsr = table['d_VLSR'].data.data
+
+        x = np.abs(vlsr - vel) / dvlsr
+
+        weight = normalized_amp * np.exp(
+            -4. * np.log(2) * x**2 / fwhm_factor**2)
+        weight[weight > 1] = 1
+
+        return weight >= self._threshold_spectral, weight
+
     def check_KDA(self, lon, lat, vel):
         p_far = 0.5
         ref = '--'
-        for table, table_ref in zip(self._kda_tables, self._kda_tables_ref):
-            lon_min, lon_max = table['lonMin'].data, table['lonMax'].data
-            lat_min, lat_max = table['latMin'].data, table['latMax'].data
-            vel_min, vel_max = table['velMin'].data, table['velMax'].data
-            # kda, pFar = table['KDA'].data, table['pFar'].data
+        dirname = os.path.dirname(os.path.realpath(__file__))
+        for table, tablename in zip(self._kda_tables, self.kda_info_tables):
+            path_to_ini = os.path.join(dirname, 'KDA_info', tablename + '.ini')
+            self.get_values_from_init_file(path_to_ini)
+            mask_pp, weight_pp = self.point_in_ellipse(table, lon, lat)
+            mask_vlsr, weight_vlsr = self.get_weight_velocity(table, vel)
 
-            i_lon = np.intersect1d(np.where(lon_min < lon)[0], np.where(lon_max > lon)[0])
-            i_lat = np.intersect1d(np.where(lat_min < lat)[0], np.where(lat_max > lat)[0])
-            i_vel = np.intersect1d(np.where(vel_min < vel)[0], np.where(vel_max > vel)[0])
-            indices = reduce(np.intersect1d, (i_lon, i_lat, i_vel))
+            mask_total = np.logical_and(mask_pp, mask_vlsr)
+            weight_total = weight_pp * weight_vlsr
+            weight_total = weight_total[mask_total]
+            p_far_values = table['p_far'].data
+            p_far_values = p_far_values[mask_total]
 
-            n_values = len(indices)
+            n_values = np.count_nonzero(mask_total)
             if n_values == 0:
                 continue
             elif n_values == 1:
-                p_far = table['pFar'][indices].data
-                ref = table_ref
+                p_far = 0.5 + self._weight_pfar * p_far_values * weight_total
+                print('single:', p_far)
+                ref = self._reference
                 break
             else:
-                p_far = sum(table['pFar'][indices].data) / n_values
-                ref = table_ref
+                p_far = 0.5 + self._weight_pfar * (np.average(
+                    p_far_values * weight_total, weights=weight_total))
+                print('multiple:', p_far)
+                ref = self._reference
                 break
 
         return round(float(p_far), 2), ref
@@ -568,9 +630,6 @@ class BayesianDistance(object):
                     os.path.join(dirname, 'KDA_info', tablename + '.dat'),
                     format='ascii')
             )
-            self._kda_tables_ref.append(
-                self._kda_info_tables_ref[tablename]
-            )
 
         self.dirname_table = os.path.dirname(self.path_to_table)
         if len(self.dirname_table) == 0:
@@ -644,7 +703,7 @@ class BayesianDistance(object):
             added_dtype = ['i4', 'f4', 'f4', 'f4', 'object',
                            'f4', 'f4', 'f4', 'f4']
 
-            if self.check_for_kda_solutions:
+            if self.check_for_kda_solutions and (self.colname_kda is None):
                 added_colnames += ['KDA_ref']
                 added_dtype += ['object']
             if self.add_kinematic_distance:
@@ -830,3 +889,131 @@ class BayesianDistance(object):
             print('\njob finished on {}'.format(time.ctime()))
             print('required run time: {:.4f} s\n'.format(
                 time.time() - start_time))
+
+    def plot_probability_density(self, source, results):
+        import matplotlib.pyplot as plt
+
+        def get_maximum_distance(distance, probability, max_dist=None):
+            try:
+                prob_threshold = 0.05
+                distance_cutoff = distance[probability > prob_threshold][-1]
+                return max(max_dist, int(distance_cutoff + 1))
+            except IndexError:
+                return max_dist
+
+        distKD, probKD = np.loadtxt(
+            os.path.join(self.path_to_bde, '{}_kinematic_distance_pdf.dat'.format(source)),
+            usecols=(0, 1), skiprows=2, unpack=True)
+
+        if self.version == '1.0':
+            distGL, probGL = np.loadtxt(
+                os.path.join(self.path_to_bde, '{}_latitude_pdf.dat'.format(source)),
+                usecols=(0, 1), skiprows=2, unpack=True)
+
+            distSA, probSA = np.loadtxt(
+                os.path.join(self.path_to_bde, '{}_spiral_arm_pdf.dat'.format(source)),
+                usecols=(0, 1), skiprows=2, unpack=True)
+        elif self.version == '2.4':
+            distSA, probSA = np.loadtxt(
+                os.path.join(self.path_to_bde, '{}_arm_latitude_pdf.dat'.format(source)),
+                usecols=(0, 1), skiprows=2, unpack=True)
+
+            distGL, probGL = distSA, probSA
+
+        arm_ranges_lower, arm_ranges_upper = np.loadtxt(
+            os.path.join(self.path_to_bde, '{}_arm_ranges.dat'.format(source)),
+            usecols=(0, 1), skiprows=2, unpack=True)
+
+        spiral_arms = np.genfromtxt(
+            os.path.join(self.path_to_bde, '{}_arm_ranges.dat'.format(source)),
+            skip_header=2, usecols=2, dtype='str')
+
+        skip_spiral_arm_ranges = False
+        if spiral_arms.size == 2:
+            arm_ranges_lower = [arm_ranges_lower[1]]
+            arm_ranges_upper = [arm_ranges_upper[1]]
+            spiral_arms = [spiral_arms[1]]
+        elif spiral_arms.size > 2:
+            arm_ranges_lower = arm_ranges_lower[1:]
+            arm_ranges_upper = arm_ranges_upper[1:]
+            spiral_arms = spiral_arms[1:]
+        else:
+            skip_spiral_arm_ranges = True
+
+        distPS, probPS = np.loadtxt(
+            os.path.join(self.path_to_bde, '{}_parallaxes_pdf.dat'.format(source)),
+            usecols=(0, 1), skiprows=2, unpack=True)
+
+        distFD, probFD = np.loadtxt(
+            os.path.join(self.path_to_bde, '{}_final_distance_pdf.dat'.format(source)),
+            usecols=(0, 1), skiprows=2, unpack=True)
+
+        max_dist = 0
+        for dist, prob in zip(
+                [distKD, distGL, distSA, distPS], [probKD, probGL, probSA, probPS]):
+            max_dist = get_maximum_distance(dist, prob, max_dist=max_dist)
+
+        fig = plt.figure(figsize=(10, 7.5))
+        ax = fig.add_subplot(1, 1, 1)
+
+        ax.set_xlabel('Distance [kpc]', size=20)
+        ax.set_ylabel('Probability density [kpc$^{-1}$]', size=20)
+
+        ax.tick_params(axis='both', labelsize=16, pad=8)
+        ax.tick_params(axis='both', which='major', direction='out',
+                       width=1.25, length=10, pad=8)
+        ax.tick_params(axis='both', which='minor', direction='out',
+                       width=1.25, length=5)
+
+        ax.plot(distKD, probKD, label='KD', lw=2.5, ls='solid', c='dodgerblue', alpha=0.75)
+        ax.plot(distGL, probGL, label='GL', lw=2.5, ls='dotted', c='orange', alpha=1.0)
+        ax.plot(distSA, probSA, label='SA', lw=2.5, ls='--', c='indianred', alpha=1.0)
+        ax.plot(distPS, probPS, label='PS', lw=2.5, ls='-.', c='forestgreen', alpha=1.0)
+        ax.plot(distFD, probFD, label='combined', lw=2, ls='solid', c='black', alpha=1.0)
+
+        if not skip_spiral_arm_ranges:
+            for lower, upper, text in zip(
+                    arm_ranges_lower, arm_ranges_upper, spiral_arms):
+                if lower > max_dist:
+                    continue
+                ax.axvspan(lower, upper, alpha=0.15, color='indianred')
+                ax.text((upper + lower)/2, ax.get_ylim()[1] * 0.99, text, size=16, color='indianred',
+                        horizontalalignment='center', verticalalignment='top')
+
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0,
+                         box.width, box.height * 0.9])
+        # Put a legend below current axis
+        leg1 = ax.legend(
+            loc='upper center', bbox_to_anchor=(0.5, 1.08),
+            fancybox=False, shadow=False, ncol=5,
+            fontsize=14, numpoints=1, frameon=0)
+
+        markers, texts = [], []
+
+        for result in results:
+            dist = float(result[1])
+            if dist <= 0:
+                continue
+            e_dist = float(result[2])
+            prob = float(result[3])
+            text = '{a:.2f}$\\pm${b:.2f}kpc ({c:.0%})'.format(
+                a=dist, b=e_dist, c=prob)
+            marker = ax.scatter(dist, 0)
+            markers.append(marker)
+            texts.append(text)
+            ax.errorbar(dist, 0, xerr=e_dist)
+
+        leg2 = ax.legend(
+            markers, texts,
+            loc='upper center', bbox_to_anchor=(0.5, 1.135),
+            fancybox=False, shadow=False, ncol=len(results),
+            fontsize=14, numpoints=1, frameon=0)
+
+        ax.set_xlim([0, max_dist])
+
+        ax.add_artist(leg1)
+
+        path_to_file = os.path.join(self.dirname_table, source + '.pdf')
+        plt.savefig(path_to_file, bbox_inches='tight')
+        plt.close()
