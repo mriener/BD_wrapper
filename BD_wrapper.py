@@ -62,8 +62,8 @@ class BayesianDistance(object):
         self.table_format = 'ascii'
         self.save_temporary_files = False
         self.default_e_vel = 5.0
-        self.kda_info_tables = ['Urquhart+18', 'Ellsworth-Bowers+15',
-                                'Roman-Duval+09']
+        self.kda_info_tables = []
+        self.exclude_kda_info_tables = []
 
         self.use_ncpus = None
         self.plot_probability = False
@@ -305,7 +305,7 @@ class BayesianDistance(object):
             input_file_content, result_file_content, kin_dist=kinDist, kda_ref=kda_ref)
 
         if self.plot_probability:
-            self.plot_probability_density(source, results)
+            self.plot_probability_density(source, results, input_file_content)
 
         #  remove for TESTING:
         if not self.save_temporary_files:
@@ -429,7 +429,23 @@ class BayesianDistance(object):
             except ValueError:
                 raise Exception('Could not parse parameter {} from config file'.format(key))
 
+    def gaussian_weight(self, x, std=False):
+        """Calculate the Gaussian weight.
+
+        Gaussian function: amp * np.exp(-4. * np.log(2) * (x-mean)**2 / fwhm**2)
+        mean = 0
+
+        Renormalization factor for amplitude, so that Gaussian function is 1 at the fwhm/2; scale = 1 / (np.exp(-np.log(2)) = np.exp(np.log(2)
+        fwhm_factor = 2 * np.sqrt(2 * np.log(2)) = 2.354820045
+        """
+        if std:
+            return np.exp((1 - x**2) / 2)  # = np.exp(0.5) * np.exp(-4. * np.log(2) * (x / 2.354820045)**2)
+        else:
+            return np.exp(np.log(2) * (1 - 4. * x**2))  # np.exp(np.log(2)) * np.exp(-4. * np.log(2) * x**2)
+
     def point_in_ellipse(self, table, lon, lat):
+        """Adapted from: https://stackoverflow.com/questions/7946187/
+        See also: https://math.stackexchange.com/questions/426150/"""
         cos_pa = table['cos_pa'].data.data
         sin_pa = table['sin_pa'].data.data
         glon = table['GLON'].data.data
@@ -439,40 +455,67 @@ class BayesianDistance(object):
 
         a = (cos_pa * (lon - glon) + sin_pa * (lat - glat))**2
         b = (sin_pa * (lon - glon) - cos_pa * (lat - glat))**2
-        ellipse = (a / aa) + (b / bb)
-        ellipse[ellipse < 1] = 1
-        weight = 1 / ellipse
+        epsilon = (a / aa) + (b / bb)
+
+        std = False
+        if self._size == 'std':
+            std = True
+        else:
+            epsilon = epsilon / 4
+
+        weight = self.gaussian_weight(np.sqrt(epsilon), std=std)
+        weight[weight > 1] = 1
 
         return weight >= self._threshold_spatial, weight
 
     def get_weight_velocity(self, table, vel):
         """Calculate the weight for the velocity association.
 
-        Gaussian function: amp * np.exp(-4. * np.log(2) * (x-mean)**2 / fwhm**2)
-        mean = 0
-        Conversion factor std to FWHM = 2.354820045
+        Parameters
+        ----------
+        table : astropy.table.table.Table
+            Table containing sources with solved kinematic distance ambiguities.
+        vel : float
+            vlsr position of the coordinate.
 
-        Renormalization factor for amplitude, so that Gaussian function is 1 at the standard deviation; scale = 1 / (np.exp(-4. * np.log(2) / (2.354820045)**2)) = 1.6487212707217973
-
+        Returns
+        -------
+        mask : numpy.ndarray
+            Mask that is true for each weight that exceeds _threshold_spectral.
+        weight : numpy.ndarray
+            Array of the weight values.
         """
-        normalized_amp = 1.6487212707217973
-        fwhm_factor = 2.354820045
-
         vlsr = table['VLSR'].data.data
         dvlsr = table['d_VLSR'].data.data
 
         x = np.abs(vlsr - vel) / dvlsr
 
-        weight = normalized_amp * np.exp(
-            -4. * np.log(2) * x**2 / fwhm_factor**2)
+        # fwhm_factor = 2.354820045
+        # if fwhm:
+        #     x = np.abs((vlsr - vel) / (dvlsr))
+        # else:
+        #     x = np.abs((vlsr - vel) / (dvlsr)) / (2 * fwhm_factor)
+
+        std = False
+        if self._linewidth == 'std':
+            std = True
+
+        weight = self.gaussian_weight(x, std=std)
         weight[weight > 1] = 1
 
         return weight >= self._threshold_spectral, weight
 
+    def check_weight_kda(self, weight_kda):
+        if abs(weight_kda) > abs(self._weight_kda):
+            self._weight_kda = weight_kda
+            self._ref = self._reference
+
     def check_KDA(self, lon, lat, vel):
         p_far = 0.5
-        ref = '--'
+        self._ref = '--'
+        self._weight_kda = 0
         dirname = os.path.dirname(os.path.realpath(__file__))
+
         for table, tablename in zip(self._kda_tables, self.kda_info_tables):
             path_to_ini = os.path.join(dirname, 'KDA_info', tablename + '.ini')
             self.get_values_from_init_file(path_to_ini)
@@ -480,6 +523,12 @@ class BayesianDistance(object):
             mask_vlsr, weight_vlsr = self.get_weight_velocity(table, vel)
 
             mask_total = np.logical_and(mask_pp, mask_vlsr)
+            # print(self._reference)
+            # try:
+            #     print('weight_pp', max(weight_pp[mask_total]))
+            #     print('weight_vlsr', max(weight_vlsr[mask_total]))
+            # except:
+            #     print('no selection')
             weight_total = weight_pp * weight_vlsr
             weight_total = weight_total[mask_total]
             p_far_values = table['p_far'].data
@@ -489,18 +538,25 @@ class BayesianDistance(object):
             if n_values == 0:
                 continue
             elif n_values == 1:
-                p_far = 0.5 + self._weight_pfar * p_far_values * weight_total
-                print('single:', p_far)
-                ref = self._reference
-                break
+                weight_kda = self._weight_cat * p_far_values * weight_total
+                self.check_weight_kda(weight_kda)
+                # p_far = 0.5 + self._weight_cat * p_far_values * weight_total
+                # print('single:', p_far, self._reference)
+                # ref = self._reference
+                # break
             else:
-                p_far = 0.5 + self._weight_pfar * (np.average(
+                weight_kda = self._weight_cat * (np.average(
                     p_far_values * weight_total, weights=weight_total))
-                print('multiple:', p_far)
-                ref = self._reference
-                break
+                self.check_weight_kda(weight_kda)
+                # p_far = 0.5 + self._weight_cat * (np.average(
+                #     p_far_values * weight_total, weights=weight_total))
+                # print('multiple:', p_far, self._reference)
+                # ref = self._reference
+                # break
 
-        return round(float(p_far), 2), ref
+        p_far = 0.5 + self._weight_kda
+
+        return round(float(p_far), 2), self._ref
 
     def determine_column_indices(self):
         self.colnr_lon = self.input_table.colnames.index(self.colname_lon)
@@ -623,7 +679,17 @@ class BayesianDistance(object):
             raise Exception(errorMessage)
 
         dirname = os.path.dirname(os.path.realpath(__file__))
-        self._kda_tables, self._kda_tables_ref = [], []
+        if not self.kda_info_tables:
+            files = os.listdir(os.path.join(dirname, 'KDA_info'))
+            self.kda_info_tables = [
+                name[:-4] for name in files if name.endswith('.ini')]
+
+        if self.exclude_kda_info_tables:
+            self.kda_info_tables = [
+                table for table in self.kda_info_tables
+                if table not in self.exclude_kda_info_tables]
+
+        self._kda_tables = []
         for tablename in self.kda_info_tables:
             self._kda_tables.append(
                 Table.read(
@@ -762,7 +828,8 @@ class BayesianDistance(object):
 
                 if len(comps_indices) == component:
                     #  TODO: in case of 50/50 split of components the first one gets discarded by default!
-                    remove = np.argmin(self.table_results['prob'][comps_indices])
+                    remove = np.argmin(
+                        self.table_results['prob'][comps_indices])
                     remove_rows = np.append(remove_rows, comps_indices[remove])
                     comps_indices = np.array([], dtype='int')
 
@@ -890,7 +957,7 @@ class BayesianDistance(object):
             print('required run time: {:.4f} s\n'.format(
                 time.time() - start_time))
 
-    def plot_probability_density(self, source, results):
+    def plot_probability_density(self, source, results, input_file_content):
         import matplotlib.pyplot as plt
 
         def get_maximum_distance(distance, probability, max_dist=None):
@@ -991,14 +1058,15 @@ class BayesianDistance(object):
 
         markers, texts = [], []
 
-        for result in results:
+        for i, result in enumerate(results):
             dist = float(result[1])
             if dist <= 0:
                 continue
             e_dist = float(result[2])
             prob = float(result[3])
-            text = '{a:.2f}$\\pm${b:.2f}kpc ({c:.0%})'.format(
-                a=dist, b=e_dist, c=prob)
+            index = 'D$_{{\\mathregular{{{}}}}}$'.format(i + 1)
+            text = '{a}={b:.2f}$\\pm${c:.2f} kpc ({d:.0%})'.format(
+                a=index, b=dist, c=e_dist, d=prob)
             marker = ax.scatter(dist, 0)
             markers.append(marker)
             texts.append(text)
@@ -1009,6 +1077,21 @@ class BayesianDistance(object):
             loc='upper center', bbox_to_anchor=(0.5, 1.135),
             fancybox=False, shadow=False, ncol=len(results),
             fontsize=14, numpoints=1, frameon=0)
+
+        for line in input_file_content:
+            if line.startswith('!'):
+                continue
+            params = line.split()
+            glon, glat, vlsr, e_vlsr, p_far = params[1:6]
+            break
+
+        text = str('$\\ell$={} deg, $b$={} deg, '
+                   'V$_{{\\mathregular{{LSR}}}}$={} $\\pm$ {} km/s, '
+                   'P$_{{\\mathregular{{far}}}}$={}'. format(
+                       glon, glat, vlsr, e_vlsr, p_far))
+        plt.title(text, fontsize=14, pad=50)
+
+        # ax.text()
 
         ax.set_xlim([0, max_dist])
 
