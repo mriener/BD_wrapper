@@ -505,15 +505,32 @@ class BayesianDistance(object):
 
         return weight >= self._threshold_spectral, weight
 
-    def check_weight_kda(self, weight_kda):
-        if abs(weight_kda) > abs(self._weight_kda):
-            self._weight_kda = weight_kda
-            self._ref = self._reference
+    def get_kda(self, weights_kda, refs):
+        if len(weights_kda) == 0:
+            return 0, '--'
+
+        if len(weights_kda) == 1:
+            return weights_kda[0], refs[0]
+
+        weights_kda_abs = [abs(x) for x in weights_kda]
+        max_weight = max(weights_kda_abs)
+
+        indices = np.argwhere(weights_kda_abs == max_weight).flatten().tolist()
+
+        if len(indices) == 1:
+            i = indices[0]
+            return weights_kda[i], refs[i]
+
+        if sum(weights_kda[indices]) == 0:
+            return 0, '--'
+        else:
+            list_weights_kda = weights_kda[indices].tolist()
+            weight = max(list_weights_kda, key=list_weights_kda.count)
+            i = np.argwhere(weights_kda == weight).flatten()[0]
+            return weight, refs[i]
 
     def check_KDA(self, lon, lat, vel):
-        p_far = 0.5
-        self._ref = '--'
-        self._weight_kda = 0
+        weights_kda, refs = np.empty([]), []
         dirname = os.path.dirname(os.path.realpath(__file__))
 
         for table, tablename in zip(self._kda_tables, self.kda_info_tables):
@@ -523,12 +540,6 @@ class BayesianDistance(object):
             mask_vlsr, weight_vlsr = self.get_weight_velocity(table, vel)
 
             mask_total = np.logical_and(mask_pp, mask_vlsr)
-            # print(self._reference)
-            # try:
-            #     print('weight_pp', max(weight_pp[mask_total]))
-            #     print('weight_vlsr', max(weight_vlsr[mask_total]))
-            # except:
-            #     print('no selection')
             weight_total = weight_pp * weight_vlsr
             weight_total = weight_total[mask_total]
             p_far_values = table['p_far'].data
@@ -538,25 +549,18 @@ class BayesianDistance(object):
             if n_values == 0:
                 continue
             elif n_values == 1:
-                weight_kda = self._weight_cat * p_far_values * weight_total
-                self.check_weight_kda(weight_kda)
-                # p_far = 0.5 + self._weight_cat * p_far_values * weight_total
-                # print('single:', p_far, self._reference)
-                # ref = self._reference
-                # break
+                weights_kda = np.append(
+                    weights_kda, self._weight_cat * p_far_values * weight_total)
+                refs.append(self._reference)
             else:
-                weight_kda = self._weight_cat * (np.average(
-                    p_far_values * weight_total, weights=weight_total))
-                self.check_weight_kda(weight_kda)
-                # p_far = 0.5 + self._weight_cat * (np.average(
-                #     p_far_values * weight_total, weights=weight_total))
-                # print('multiple:', p_far, self._reference)
-                # ref = self._reference
-                # break
+                weights_kda = np.append(weights_kda, self._weight_cat * (np.average(
+                    p_far_values * weight_total, weights=weight_total)))
+                refs.append(self._reference)
 
-        p_far = 0.5 + self._weight_kda
+        weight_kda, ref = self.get_kda(weights_kda, refs)
+        p_far = 0.5 + weight_kda
 
-        return round(float(p_far), 2), self._ref
+        return round(float(p_far), 2), ref
 
     def determine_column_indices(self):
         self.colnr_lon = self.input_table.colnames.index(self.colname_lon)
