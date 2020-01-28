@@ -64,6 +64,7 @@ class BayesianDistance(object):
         self.default_e_vel = 5.0
         self.kda_info_tables = []
         self.exclude_kda_info_tables = []
+        self.kda_weight = 1
 
         self.use_ncpus = None
         self.plot_probability = False
@@ -371,11 +372,11 @@ class BayesianDistance(object):
 
         if self.colnr_kda is not None:
             if row[self.colnr_kda] == 'F':
-                p_far = 1.0
+                p_far = 1.0 * self.kda_weight
             elif row[self.colnr_kda] == 'N':
-                p_far = 0.0
+                p_far = 0.0 * self.kda_weight
             elif isinstance(row[self.colnr_kda], float):
-                p_far = row[self.colnr_kda]
+                p_far = row[self.colnr_kda] * self.kda_weight
         elif self.check_for_kda_solutions:
             p_far, kda_ref = self.check_KDA(lon, lat, vel)
 
@@ -530,7 +531,7 @@ class BayesianDistance(object):
             return weight, refs[i]
 
     def check_KDA(self, lon, lat, vel):
-        weights_kda, refs = np.empty([]), []
+        weights_kda, refs = np.array([]), []
         dirname = os.path.dirname(os.path.realpath(__file__))
 
         for table, tablename in zip(self._kda_tables, self.kda_info_tables):
