@@ -7,8 +7,6 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table
 
-from functools import reduce
-
 
 class BayesianDistance(object):
     def __init__(self, filename=None):
@@ -415,9 +413,7 @@ class BayesianDistance(object):
         return rows
 
     def get_values_from_init_file(self, init_file):
-        """Read in values from init file.
-
-        """
+        """Read in values from init file."""
         import ast
         import configparser
         config = configparser.ConfigParser()
@@ -484,6 +480,7 @@ class BayesianDistance(object):
             Mask that is true for each weight that exceeds _threshold_spectral.
         weight : numpy.ndarray
             Array of the weight values.
+
         """
         vlsr = table['VLSR'].data.data
         dvlsr = table['d_VLSR'].data.data
@@ -530,7 +527,7 @@ class BayesianDistance(object):
             return weight, refs[i]
 
     def check_KDA(self, lon, lat, vel):
-        weights_kda, refs = np.empty([]), []
+        weights_kda, refs = np.array([]), []
         dirname = os.path.dirname(os.path.realpath(__file__))
 
         for table, tablename in zip(self._kda_tables, self.kda_info_tables):
