@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import Table, Column
 
 
 class BayesianDistance(object):
@@ -121,8 +121,7 @@ class BayesianDistance(object):
         os.chdir(cwd)
 
     def make_fortran_out(self, source):
-        """
-        Create a fortran executable for the source.
+        """Create a fortran executable for the source.
 
         Replaces the default input file in the fortran script of the Bayesian
         distance estimator with the input file of the source, then creates a
@@ -136,8 +135,7 @@ class BayesianDistance(object):
                 self.path_to_source, self.path_to_source))
 
     def extract_string(self, s, first, last, incl=False):
-        """
-        Search for a substring inside a string.
+        """Search for a substring inside a string.
 
         Parameters
         ----------
@@ -151,6 +149,7 @@ class BayesianDistance(object):
         Returns
         -------
         substring of s
+
         """
         try:
             if incl is True:
@@ -443,12 +442,12 @@ class BayesianDistance(object):
     def point_in_ellipse(self, table, lon, lat):
         """Adapted from: https://stackoverflow.com/questions/7946187/
         See also: https://math.stackexchange.com/questions/426150/"""
-        cos_pa = table['cos_pa'].data.data
-        sin_pa = table['sin_pa'].data.data
-        glon = table['GLON'].data.data
-        glat = table['GLAT'].data.data
-        aa = table['aa'].data.data
-        bb = table['bb'].data.data
+        cos_pa = table['cos_pa'].data
+        sin_pa = table['sin_pa'].data
+        glon = table['GLON'].data
+        glat = table['GLAT'].data
+        aa = table['aa'].data
+        bb = table['bb'].data
 
         a = (cos_pa * (lon - glon) + sin_pa * (lat - glat))**2
         b = (sin_pa * (lon - glon) - cos_pa * (lat - glat))**2
@@ -633,22 +632,6 @@ class BayesianDistance(object):
 
         self.create_astropy_table(results_list)
 
-    def initialize_data(self):
-        self.dirname = os.path.dirname(self.path_to_file)
-        self.file = os.path.basename(self.path_to_file)
-        self.filename, self.fileExtension = os.path.splitext(self.file)
-
-        self.dirname_table = os.path.dirname(self.path_to_table)
-        self.table_file = os.path.basename(self.path_to_table)
-        if not os.path.exists(self.dirname_table):
-            os.makedirs(self.dirname_table)
-
-        hdu = fits.open(self.path_to_file)[0]
-        self.data = hdu.data
-        self.header = hdu.header
-        self.shape = (self.data.shape[0], self.data.shape[1],
-                      self.data.shape[2])
-
     def check_settings(self):
         if (self.path_to_bde is None) and (self.version is None):
             raise Exception("Need to specify 'path_to_bde' or 'version'")
@@ -714,46 +697,6 @@ class BayesianDistance(object):
         heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
         self.say(heading)
 
-    def create_input_table(self):
-        self.say('creating input table...')
-
-        self.initialize_data()
-
-        velocityOffset = self.header['CRVAL3'] -\
-            self.header['CDELT3']*(self.header['CRPIX3'] - 1)
-
-        x_pos, y_pos, z_pos, intensity, longitude, latitude, velocity = (
-                [] for i in range(7))
-
-        for (x, y, z) in itertools.product(range(self.data.shape[2]),
-                                           range(self.data.shape[1]),
-                                           range(self.data.shape[0])):
-            if float(self.data[z, y, x]) > self.intensity_threshold:
-                x_pos.append(x)
-                y_pos.append(y)
-                z_pos.append(z)
-                intensity.append(self.data[z, y, x])
-                lon = (x - self.header['CRPIX1'])*self.header['CDELT1'] +\
-                    self.header['CRVAL1']
-                longitude.append(lon)
-                lat = (y - self.header['CRPIX2'])*self.header['CDELT2'] +\
-                    self.header['CRVAL2']
-                latitude.append(lat)
-                vel = (velocityOffset + np.array(z) *
-                       self.header['CDELT3']) / 1000
-                velocity.append(vel)
-
-        names = ['x_pos', 'y_pos', 'z_pos', 'intensity', 'lon', 'lat', 'vel']
-        self.input_table = Table([x_pos, y_pos, z_pos, intensity, longitude,
-                                 latitude, velocity], names=names)
-
-        if self.save_input_table:
-            filename = '{}_input.dat'.format(self.filename)
-            path_to_table = os.path.join(self.dirname_table, filename)
-            self.input_table.write(path_to_table, format='ascii', overwrite=True)
-            self.say(">> saved input table '{}' in {}".format(
-                     filename, self.dirname_table))
-
     def create_astropy_table(self, results):
         self.say('creating Astropy table...')
         if self.gpy_setting:
@@ -795,12 +738,43 @@ class BayesianDistance(object):
         self.table_results.write(self.path_to_table, format=self.table_format,
                                  overwrite=True)
 
+    def choose_distance(self, comps_indices):
+        """Choose distance from alternative solutions.
+
+        Flags for the chosen distance:
+        - 0: only 1 distance solution existed
+        - 1: distance solution had the highest probability
+        - 2: distance solutions were tied in their probabilites; chosen distance had the lowest distance error
+        - 3: distance solutions were tied in their probabilites and distance errors; chosen distance is the near distance
+        """
+        if len(comps_indices) == 1:
+            return [], 0
+
+        probabilities = self.table_results['prob'][comps_indices]
+        remove = np.where(probabilities == min(probabilities))[0]
+        if len(remove) == 1:
+            return remove, 1
+
+        dist_errors = self.table_results['e_dist'][comps_indices]
+        remove = np.where(dist_errors == max(dist_errors))[0]
+        if len(remove) == 1:
+            return remove, 2
+
+        distances = self.table_results['dist'][comps_indices]
+        remove = np.argmax(distances)
+        return remove, 3
+        # remove = np.argmin(
+        #     self.table_results['prob'][comps_indices])
+        # remove_rows = np.append(remove_rows, comps_indices[remove])
+        # comps_indices = np.array([], dtype='int')
+        # pass
+
     def get_table_distance_max_probability(self, save=True):
         from tqdm import tqdm
         self.say('creating Astropy table containing only distance results '
                  'with the highest probability...')
 
-        remove_rows = np.array([])
+        remove_rows, choice_flags = np.array([]), np.array([])
 
         if self.version == '1.0':
             for idx, component in tqdm(enumerate(self.table_results['comp'])):
@@ -829,14 +803,22 @@ class BayesianDistance(object):
                 comps_indices = np.append(comps_indices, idx)
 
                 if len(comps_indices) == component:
-                    #  TODO: in case of 50/50 split of components the first one gets discarded by default!
-                    remove = np.argmin(
-                        self.table_results['prob'][comps_indices])
+                    # #  TODO: in case of 50/50 split of components the first one gets discarded by default!
+                    # remove = np.argmin(
+                    #     self.table_results['prob'][comps_indices])
+                    # remove_rows = np.append(remove_rows, comps_indices[remove])
+                    # comps_indices = np.array([], dtype='int')
+                    remove, flag = self.choose_distance(comps_indices)
                     remove_rows = np.append(remove_rows, comps_indices[remove])
+                    choice_flags = np.append(choice_flags, flag)
                     comps_indices = np.array([], dtype='int')
 
         remove_rows = remove_rows.astype(int)
         self.table_results.remove_rows(remove_rows)
+
+        if self.version == '2.4':
+            self.table_results.add_column(
+                Column(data=choice_flags, name='flag', dtype='int'))
 
         if save:
             self.table_file = '{}{}{}'.format(self.table_filename, '_p_max',
@@ -861,103 +843,6 @@ class BayesianDistance(object):
             return idx[max_idx], arms[max_idx]
         else:
             return idx[max_idx]
-
-    def make_ppp_intensity_cube(self):
-        self.say('create PPP weighted intensity cube...')
-
-        self.check_settings()
-        self.initialize_data()
-
-        self.table = Table.read(self.path_to_table, format='ascii.fixed_width')
-        maxDist = int(max(self.table['dist'])) + 1
-        zrange = int(maxDist/self.distance_spacing)
-        self.shape = (zrange, self.data.shape[1], self.data.shape[2])
-        array = np.zeros(self.shape, dtype='float32')
-        self.header['NAXIS3'] = zrange
-        self.header['CRPIX3'] = 1.
-        self.header['CRVAL3'] = self.distance_spacing
-        self.header['CDELT3'] = self.distance_spacing
-        self.header['CTYPE3'] = 'DISTANCE'
-        index_list = []
-
-        for idx, (component, probability) in enumerate(
-                zip(self.table['comp'], self.table['dist'])):
-            if idx == 0:
-                comps_indices = [idx]
-            else:
-                if component == 1:
-                    index = self.find_index_max_probability(comps_indices)
-                    index_list.append(index)
-
-                    x = self.table['x_pos'][index]
-                    y = self.table['y_pos'][index]
-                    dist = round(self.table['dist'][index], 1)
-                    z = round(dist / self.distance_spacing)
-                    intensity = self.table['intensity'][index]
-
-                    array[z, y, x] += intensity
-
-                    comps_indices = [idx]
-                if component != 1:
-                    comps_indices.append(idx)
-
-        filename = '{}_distance_ppp.fits'.format(self.filename)
-        pathname = os.path.join(self.dirname_table, 'FITS')
-        if not os.path.exists(pathname):
-            os.makedirs(pathname)
-        path_to_file = os.path.join(pathname, filename)
-        fits.writeto(path_to_file, array, self.header, overwrite=True)
-        self.say(">> saved '{}' to {}".format(filename, pathname))
-
-    def make_ppv_distance_cube(self):
-        self.say('create PPV distance cube...')
-
-        self.check_settings()
-        self.initialize_data()
-
-        self.table = Table.read(self.path_to_table,
-                                format='ascii.fixed_width')
-        array = np.zeros(self.shape, dtype='float32')
-        index_list = []
-
-        for idx, (component, probability) in enumerate(
-                zip(self.table['comp'], self.table['dist'])):
-            if idx == 0:
-                comps_indices = [idx]
-            else:
-                if component == 1:
-                    index = self.find_index_max_probability(comps_indices)
-                    index_list.append(index)
-
-                    x = self.table['x_pos'][index]
-                    y = self.table['y_pos'][index]
-                    z = self.table['z_pos'][index]
-                    dist = self.table['dist'][index]
-
-                    array[z, y, x] = dist
-
-                    comps_indices = [idx]
-                if component != 1:
-                    comps_indices.append(idx)
-
-        filename = '{}_distance.fits'.format(self.filename)
-        pathname = os.path.join(self.dirname_table, 'FITS')
-        if not os.path.exists(pathname):
-            os.makedirs(pathname)
-        path_to_file = os.path.join(pathname, filename)
-        fits.writeto(path_to_file, array, self.header, overwrite=True)
-        self.say(">> saved '{}' to {}".format(filename, pathname))
-
-    def timer(self, mode='start', start_time=None):
-        """"""
-        import time
-
-        if mode == 'start':
-            return time.time()
-        elif mode == 'stop':
-            print('\njob finished on {}'.format(time.ctime()))
-            print('required run time: {:.4f} s\n'.format(
-                time.time() - start_time))
 
     def plot_probability_density(self, source, results, input_file_content):
         import matplotlib.pyplot as plt
