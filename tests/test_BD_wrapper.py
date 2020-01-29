@@ -14,6 +14,19 @@ class TestBayesianDistance(unittest.TestCase):
             format='ascii')
         self.bdc = bdw.BayesianDistance()
 
+    def test_get_cartesian_coords(self):
+        bdc = bdw.BayesianDistance()
+
+        for (glon, glat, dist), result in zip(
+                [(0, 0, 10),
+                 (90, 0, 10),
+                 (0, 90, 10)],
+                [(10.0, 0.0, 0.0),
+                 (0.0, 10.0, 0.0),
+                 (0.0, 0.0, 10.0)]):
+            result = bdc.get_cartesian_coords(glon, glat, dist)
+            self.assertEqual(result, result)
+
     def test_get_kda(self):
         bdc = bdw.BayesianDistance()
         weight, refs = bdc.get_kda(
