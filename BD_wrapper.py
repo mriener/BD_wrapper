@@ -26,17 +26,8 @@ class BayesianDistance(object):
             Gaussian decompositions
         input_table : table containing information of the Gaussian
             decompositions
-        save_input_table : The default is 'False'. If set to 'True' `input_table`
-            is saved in the directory `path_to_table`
         verbose : The default is 'True'. Prints status messages to the
             terminal.
-        gpy_setting : The default is 'False'. Set it to 'True' if `input_table`
-            is created from a GaussPy decomposition
-        intensity_threshold : Sets the threshold in integrated intensity of
-            which decomposed Gaussian components should be considered. The
-            default is '0.1'.
-        distance_spacing : Only used for the creation of ppp distance cubes.
-            The default is '0.1' [kpc]
         """
         self.path_to_bde = None
         self.version = '2.4'
@@ -44,12 +35,9 @@ class BayesianDistance(object):
         self.path_to_input_table = None
         self.path_to_output_table = None
         self.input_table = None
-        self.save_input_table = False
         self.verbose = True
-        self.gpy_setting = False
-        self.intensity_threshold = 0.1
-        self.distance_spacing = 0.1  # in [kpc]
         self.add_kinematic_distance = True
+        self.add_galactocentric_distance = True
         self.check_for_kda_solutions = True
         self.colname_lon, self.colname_lat, self.colname_vel,\
             self.colname_e_vel, self.colname_kda = (None for i in range(5))
@@ -71,11 +59,13 @@ class BayesianDistance(object):
             '1.0': {
                 'bdc_fortran': 'Bayesian_distance_v1.0.f',
                 'summary_suffix': '.prt',
-                'fct_extract': self.extract_results_v1p0},
+                'fct_extract': self.extract_results_v1p0,
+                'R_0': 8.34},
             '2.4': {
                 'bdc_fortran': 'Bayesian_distance_2019_fromlist_v2.4.f',
                 'summary_suffix': 'summary.prt',
-                'fct_extract': self.extract_results_v2p4}
+                'fct_extract': self.extract_results_v2p4,
+                'R_0': 8.15}
         }
 
     def say(self, message, end=None):
@@ -310,11 +300,6 @@ class BayesianDistance(object):
             for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
                 os.remove(os.path.join(self.path_to_bde, filename))
 
-        # if self.version == '1.0':
-        #     results = self.extract_results_v1p0(result_file_content, kinDist)
-        # elif self.version == '2.4':
-        #     results = self.extract_results_v2p4(
-        #         input_file_content, result_file_content)
         return results
 
     def run_bdc_script(self, source, input_string):
@@ -348,21 +333,14 @@ class BayesianDistance(object):
         """
         e_vel = None
 
-        if self.gpy_setting:
-            x_pos, y_pos, z_pos, intensity, lon, lat, vel = row
-            source = "X{}Y{}Z{}".format(x_pos, y_pos, z_pos)
-        else:
-            # source, lon, lat, vel = row
-            # source = "LON{}LAT{}VEL{}".format(
-            #     row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel])
-            source = "SRC{}".format(str(idx).zfill(9))
-            lon, lat, vel =\
-                row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel]
+        source = "SRC{}".format(str(idx).zfill(9))
+        lon, lat, vel =\
+            row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel]
 
-            if self.colnr_e_vel is not None:
-                e_vel = row[self.colnr_e_vel]
-                if abs(float(e_vel)) > 10:#abs(float(vel)):
-                    e_vel = None
+        if self.colnr_e_vel is not None:
+            e_vel = row[self.colnr_e_vel]
+            if abs(float(e_vel)) > 10:#abs(float(vel)):
+                e_vel = None
 
         p_far = 0.5
         kda_ref = None
@@ -402,10 +380,6 @@ class BayesianDistance(object):
                 self.run_bdc_script(source, input_string)
 
         rows = []
-        if self.gpy_setting:
-            row = [x_pos, y_pos, z_pos, intensity, lon, lat, vel]
-        # else:
-        #     row = [source, lon, lat, vel]
         results = self.get_results(source, kda_ref)
         for result in results:
             rows.append(row + result)
@@ -599,15 +573,12 @@ class BayesianDistance(object):
 
         self.say('calculating Bayesian distance...')
 
-        if self.gpy_setting:
-            self.create_input_table()
-        else:
-            if self.input_table is None:
-                self.input_table = Table.read(
-                    self.path_to_input_table, format='ascii')
-                #  TESTING:
-                # self.input_table = self.input_table[62000:62001]
-            self.determine_column_indices()
+        if self.input_table is None:
+            self.input_table = Table.read(
+                self.path_to_input_table, format='ascii')
+            #  TESTING:
+            # self.input_table = self.input_table[62000:62001]
+        self.determine_column_indices()
 
         import BD_wrapper.BD_multiprocessing as BD_multiprocessing
         BD_multiprocessing.init([self, self.input_table])
@@ -631,6 +602,27 @@ class BayesianDistance(object):
                 pickle.dump(results_list, p_file)
 
         self.create_astropy_table(results_list)
+
+    def galactocentric_distance(self, glon, dist_los, glat=None):
+        """Calculate galactocentric distance.
+
+        Parameters
+        ----------
+        glon : float [radians]
+            Galactic longitude angle of the line of sight. Has to be supplied in [radians].
+        dist_los : float [kpc]
+            Distance along the line of sight. Has to be supplied in [kpc].
+        glat : float [radians]
+            Galactic latitude angle of the line of sight. Has to be supplied in [radians].
+        Returns
+        -------
+        Galactocentric distance in [kpc].
+
+        """
+        if glat is not None:
+            dist_los = dist_los * np.cos(glat)
+        R_0 = self._p[self.version]['R_0']
+        return np.sqrt(R_0**2 + dist_los**2 - 2*R_0*dist_los*np.cos(glon))
 
     def check_settings(self):
         if (self.path_to_bde is None) and (self.version is None):
@@ -699,36 +691,39 @@ class BayesianDistance(object):
 
     def create_astropy_table(self, results):
         self.say('creating Astropy table...')
-        if self.gpy_setting:
-            names = ('x_pos', 'y_pos', 'z_pos', 'intensity', 'lon', 'lat',
-                     'vel', 'comp', 'dist', 'e_dist', 'prob', 'arm')
-            dtype = ('i4', 'i4', 'i4', 'f4', 'f4', 'f4', 'f4',
-                     'i4', 'f4', 'f4', 'f4', 'object')
-        else:
-            added_colnames = ['comp', 'dist', 'e_dist', 'prob', 'arm',
-                              'c_u', 'c_v', 'c_w', 'p_far']
 
-            dtypeinput_table = []
-            for name, dtype in self.input_table.dtype.descr:
-                dtypeinput_table.append(dtype)
-            added_dtype = ['i4', 'f4', 'f4', 'f4', 'object',
-                           'f4', 'f4', 'f4', 'f4']
+        added_colnames = ['comp', 'dist', 'e_dist', 'prob', 'arm',
+                          'c_u', 'c_v', 'c_w', 'p_far']
 
-            if self.check_for_kda_solutions and (self.colname_kda is None):
-                added_colnames += ['KDA_ref']
-                added_dtype += ['object']
-            if self.add_kinematic_distance:
-                added_colnames += ['kDist_1', 'kDist_2']
-                added_dtype += ['f4', 'f4']
-            names = self.input_table.colnames + added_colnames
-            dtype = dtypeinput_table + added_dtype
+        dtypeinput_table = []
+        for name, dtype in self.input_table.dtype.descr:
+            dtypeinput_table.append(dtype)
+        added_dtype = ['i4', 'f4', 'f4', 'f4', 'object',
+                       'f4', 'f4', 'f4', 'f4']
+
+        if self.check_for_kda_solutions and (self.colname_kda is None):
+            added_colnames += ['KDA_ref']
+            added_dtype += ['object']
+        if self.add_kinematic_distance:
+            added_colnames += ['kDist_1', 'kDist_2']
+            added_dtype += ['f4', 'f4']
+
+        names = self.input_table.colnames + added_colnames
+        dtype = dtypeinput_table + added_dtype
 
         self.table_results = Table(data=results, names=names, dtype=dtype)
 
-        for key in ['dist', 'e_dist', 'prob', 'c_u', 'c_v', 'c_w']:
+        if self.add_galactocentric_distance:
+            rgal = self.galactocentric_distance(
+                np.radians(self.table_results[self.colname_lon].data),
+                self.table_results['dist'].data,
+                glat=np.radians(self.table_results[self.colname_lat].data))
+            self.table_results.add_column(Column(data=rgal, name='rgal'))
+
+        for key in ['c_u', 'c_v', 'c_w', 'rgal']:
             if key in self.table_results.colnames:
-                self.table_results[key].format = "{0:.4f}"
-        for key in ['p_far', 'kDist_1', 'kDist_2']:
+                self.table_results[key].format = "{0:.3f}"
+        for key in ['dist', 'e_dist', 'prob', 'p_far', 'kDist_1', 'kDist_2']:
             if key in self.table_results.colnames:
                 self.table_results[key].format = "{0:.2f}"
 
@@ -763,11 +758,6 @@ class BayesianDistance(object):
         distances = self.table_results['dist'][comps_indices]
         remove = np.argmax(distances)
         return remove, 3
-        # remove = np.argmin(
-        #     self.table_results['prob'][comps_indices])
-        # remove_rows = np.append(remove_rows, comps_indices[remove])
-        # comps_indices = np.array([], dtype='int')
-        # pass
 
     def get_table_distance_max_probability(self, save=True):
         from tqdm import tqdm
@@ -803,11 +793,6 @@ class BayesianDistance(object):
                 comps_indices = np.append(comps_indices, idx)
 
                 if len(comps_indices) == component:
-                    # #  TODO: in case of 50/50 split of components the first one gets discarded by default!
-                    # remove = np.argmin(
-                    #     self.table_results['prob'][comps_indices])
-                    # remove_rows = np.append(remove_rows, comps_indices[remove])
-                    # comps_indices = np.array([], dtype='int')
                     remove, flag = self.choose_distance(comps_indices)
                     remove_rows = np.append(remove_rows, comps_indices[remove])
                     choice_flags = np.append(choice_flags, flag)
