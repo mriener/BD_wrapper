@@ -667,12 +667,14 @@ class BayesianDistance(object):
                 if table not in self.exclude_kda_info_tables]
 
         self._kda_tables = []
+        keys = ['GLON', 'GLAT', 'VLSR', 'd_VLSR', 'p_far',
+                'cos_pa', 'sin_pa', 'aa', 'bb']
         for tablename in self.kda_info_tables:
-            self._kda_tables.append(
-                Table.read(
-                    os.path.join(dirname, 'KDA_info', tablename + '.dat'),
-                    format='ascii')
-            )
+            table = Table.read(os.path.join(
+                dirname, 'KDA_info', tablename + '.dat'), format='ascii')
+            table = table[keys]
+
+            self._kda_tables.append(table)
 
         self.dirname_table = os.path.dirname(self.path_to_table)
         if len(self.dirname_table) == 0:
