@@ -1,6 +1,7 @@
 import itertools
 import os
 import pickle
+import warnings
 
 import numpy as np
 
@@ -347,10 +348,12 @@ class BayesianDistance(object):
 
         if self.colnr_kda is not None:
             if row[self.colnr_kda] == 'F':
-                p_far = 1.0 * self.kda_weight
+                p_far = 0.5 + 0.5 * self.kda_weight
             elif row[self.colnr_kda] == 'N':
-                p_far = 0.0 * self.kda_weight
+                p_far = 0.5 - 0.5 * self.kda_weight
             elif isinstance(row[self.colnr_kda], float):
+                warnings.warn(
+                    "KDA solutions need to be given as strings ('N', 'F')")
                 p_far = row[self.colnr_kda] * self.kda_weight
         elif self.check_for_kda_solutions:
             p_far, kda_ref = self.check_KDA(lon, lat, vel)
