@@ -4,6 +4,7 @@ import pickle
 import warnings
 
 import numpy as np
+from shutil import copyfile
 
 from astropy.io import fits
 from astropy.table import Table, Column
@@ -41,9 +42,11 @@ class BayesianDistance(object):
         self.add_galactocentric_distance = True
         self.check_for_kda_solutions = True
         self.colname_lon, self.colname_lat, self.colname_vel,\
-            self.colname_e_vel, self.colname_kda = (None for i in range(5))
+            self.colname_e_vel, self.colname_kda, self.colname_name = (
+                None for i in range(6))
         self.colnr_lon, self.colnr_lat, self.colnr_vel,\
-            self.colnr_e_vel, self.colnr_kda = (None for i in range(5))
+            self.colnr_e_vel, self.colnr_kda, self.colnr_name = (
+                None for i in range(6))
         self.prob_sa, self.prob_kd, self.prob_gl, self.prob_ps, self.prob_pm =\
             (None for _ in range(5))
         self.table_format = 'ascii'
@@ -264,7 +267,11 @@ class BayesianDistance(object):
                 results.append(result)
         return results
 
-    def get_results(self, source, kda_ref):
+    def delete_all_temporary_files(self, source):
+        for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
+            os.remove(os.path.join(self.path_to_bde, filename))
+
+    def get_results(self, source, kda_ref=None, name=None):
         """
         Extract the distance results from the output file ({source_name}.prt)
         of the Bayesian distance estimator tool.
@@ -293,13 +300,20 @@ class BayesianDistance(object):
         results = self._p[self.version]['fct_extract'](
             input_file_content, result_file_content, kin_dist=kinDist, kda_ref=kda_ref)
 
-        if self.plot_probability:
-            self.plot_probability_density(source, results, input_file_content)
-
-        #  remove for TESTING:
-        if not self.save_temporary_files:
+        if self.save_temporary_files:
             for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-                os.remove(os.path.join(self.path_to_bde, filename))
+                src = os.path.join(self.path_to_bde, filename)
+                if name is not None:
+                    filename_new = filename.replace(source, name)
+                dst = os.path.join(
+                    os.path.dirname(self.path_to_output_table), filename_new)
+                copyfile(src, dst)
+
+        if self.plot_probability:
+            self.plot_probability_density(
+                source, results, input_file_content, name=name)
+
+        self.delete_all_temporary_files(source)
 
         return results
 
@@ -315,6 +329,7 @@ class BayesianDistance(object):
         os.chdir(cwd)
 
     def bdc_calculation_ok(self, source):
+        """Check if BDC yielded any distance results."""
         suffix = self._p[self.version]['summary_suffix']
         for filename in [f for f in os.listdir(self.path_to_bde)
                          if f.startswith(source) and f.endswith(suffix)]:
@@ -326,23 +341,28 @@ class BayesianDistance(object):
 
         return False
 
-    def determine(self, row, idx):
-        row = list(row)
-        """
-        Determine the distance of an lbv data point with the Bayesian distance
-        estmator tool.
-        """
+    def determine_e_vel(self, row):
+        """Determine uncertainty for vlsr value."""
         e_vel = None
-
-        source = "SRC{}".format(str(idx).zfill(9))
-        lon, lat, vel =\
-            row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel]
 
         if self.colnr_e_vel is not None:
             e_vel = row[self.colnr_e_vel]
-            if abs(float(e_vel)) > 10:#abs(float(vel)):
+            if abs(float(e_vel)) > 10:  # abs(float(vel)):
                 e_vel = None
 
+        if self.version == '1.0':
+            plusminus = ''
+        elif self.version == '2.4':
+            # TODO: implement minimum error for velocity
+            if e_vel is not None:
+                plusminus = '{}\t'.format(e_vel)
+            else:
+                plusminus = '{}\t'.format(self.default_e_vel)
+
+        return plusminus
+
+    def determine_p_far_and_kda_ref(self, row, lon, lat, vel):
+        """Determine KDA prior and corresponding literature reference."""
         p_far = 0.5
         kda_ref = None
 
@@ -358,24 +378,32 @@ class BayesianDistance(object):
         elif self.check_for_kda_solutions:
             p_far, kda_ref = self.check_KDA(lon, lat, vel)
 
-        if self.version == '1.0':
-            plusminus = ''
-        elif self.version == '2.4':
-            # TODO: implement minimum error for velocity
-            if e_vel is not None:
-                plusminus = '{}\t'.format(e_vel)
-            else:
-                plusminus = '{}\t'.format(self.default_e_vel)
+        return p_far, kda_ref
+
+    def determine(self, row, idx):
+        """Determine distance of lbv data point via the BDC."""
+        row = list(row)
+
+        source = "SRC{}".format(str(idx).zfill(9))
+        lon, lat, vel =\
+            row[self.colnr_lon], row[self.colnr_lat], row[self.colnr_vel]
+
+        name = None
+        if self.colnr_name is not None:
+            name = row[self.colnr_name]
+
+        plusminus = self.determine_e_vel(row)
+        p_far, kda_ref = self.determine_p_far_and_kda_ref(row, lon, lat, vel)
 
         input_string = "{a}\t{b}\t{c}\t{d}\t{e}{f}\t-\n".format(
             a=source, b=lon, c=lat, d=vel, e=plusminus, f=p_far)
 
         self.run_bdc_script(source, input_string)
 
+        #  rerun BDC calculation with p_far = 0.5 if chosen p_far value did not yield distance results
         if (self.version == '2.4') and (p_far != 0.5):
             if not self.bdc_calculation_ok(source):
-                for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-                    os.remove(os.path.join(self.path_to_bde, filename))
+                self.delete_all_temporary_files(source)
 
                 p_far = 0.5
                 input_string = "{a}\t{b}\t{c}\t{d}\t{e}{f}\t-\n".format(
@@ -383,7 +411,7 @@ class BayesianDistance(object):
                 self.run_bdc_script(source, input_string)
 
         rows = []
-        results = self.get_results(source, kda_ref)
+        results = self.get_results(source, kda_ref=kda_ref, name=name)
         for result in results:
             rows.append(row + result)
 
@@ -544,6 +572,8 @@ class BayesianDistance(object):
             self.colnr_e_vel = self.input_table.colnames.index(self.colname_e_vel)
         if self.colname_kda is not None:
             self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
+        if self.colname_name is not None:
+            self.colnr_name = self.input_table.colnames.index(self.colname_name)
 
     def get_cartesian_coords(self, lon, lat, dist):
         from astropy.coordinates import SkyCoord
@@ -553,7 +583,7 @@ class BayesianDistance(object):
                      b=lat*u.degree,
                      distance=dist*u.kpc,
                      frame='galactic')
-        c.representation = 'cartesian'
+        c.representation_type = 'cartesian'
         c_u = round(c.u.value, 4)
         c_v = round(c.v.value, 4)
         c_w = round(c.w.value, 4)
@@ -617,6 +647,7 @@ class BayesianDistance(object):
             Distance along the line of sight. Has to be supplied in [kpc].
         glat : float [radians]
             Galactic latitude angle of the line of sight. Has to be supplied in [radians].
+
         Returns
         -------
         Galactocentric distance in [kpc].
@@ -834,7 +865,8 @@ class BayesianDistance(object):
         else:
             return idx[max_idx]
 
-    def plot_probability_density(self, source, results, input_file_content):
+    def plot_probability_density(self, source, results, input_file_content,
+                                 name=None):
         import matplotlib.pyplot as plt
 
         def get_maximum_distance(distance, probability, max_dist=None):
@@ -921,7 +953,7 @@ class BayesianDistance(object):
                 if lower > max_dist:
                     continue
                 ax.axvspan(lower, upper, alpha=0.15, color='indianred')
-                ax.text((upper + lower)/2, ax.get_ylim()[1] * 0.99, text, size=16, color='indianred',
+                ax.text((upper + lower)/2, ax.get_ylim()[1] * 0.99, text, size=14, color='indianred',
                         horizontalalignment='center', verticalalignment='top')
 
         box = ax.get_position()
@@ -973,6 +1005,9 @@ class BayesianDistance(object):
         ax.set_xlim([0, max_dist])
 
         ax.add_artist(leg1)
+
+        if name is not None:
+            source = name
 
         path_to_file = os.path.join(self.dirname_table, source + '.pdf')
         plt.savefig(path_to_file, bbox_inches='tight')
