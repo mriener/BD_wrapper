@@ -586,14 +586,38 @@ c        Use Sum{arm_probabilities) for P_max, but clip so that <P_max_SA
          P_max = min( P_max_SA, sum_arm_probs )
          call condition_pdf (num_bins, bin_size, P_max, prob_arm)
 
+C        Next 5 lines added by M. Riener
+         pdf_name = 'arm_pdf'
+         if ( lu_out .ge.7 ) then
+            call output_pdf ( lu_out, pdf_name, src, num_bins,
+     +                        dist_bins, prob_arm )
+         endif
+
 c        Latitude distance pdf...
          call condition_pdf (num_bins, bin_size, P_max_GL, prob_lat)
+
+C        Next 5 lines added by M. Riener
+         pdf_name = 'latitude_pdf'
+         if ( lu_out .ge.7 ) then
+            call output_pdf ( lu_out, pdf_name, src, num_bins,
+     +                        dist_bins, prob_lat )
+         endif
 
 c        Combine spiral arm pdf and latitude pdf...
          do n_b = 1, num_bins
             prob_armlat(n_b) = prob_arm(n_b) * prob_lat(n_b)
          enddo
-         call condition_pdf (num_bins, bin_size, P_max, prob_armlat)
+
+C        Next 8 lines added by M. Riener
+         if ( P_max_SA.eq.0.d0 ) then
+            P_max_GL = P_max_GL / 2.d0
+            call condition_pdf (num_bins, bin_size, P_max_GL,
+     +                          prob_armlat)
+         else
+            call condition_pdf (num_bins, bin_size, P_max,
+     +                          prob_armlat)
+         endif
+
          pdf_name = 'arm_latitude_pdf'
          if ( lu_out .ge.7 ) then
             call output_arm_pdf ( lu_out, pdf_name, src, num_bins,
