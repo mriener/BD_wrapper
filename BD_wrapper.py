@@ -952,9 +952,11 @@ class BayesianDistance(object):
                     arm_ranges_lower, arm_ranges_upper, spiral_arms):
                 if lower > max_dist:
                     continue
+                horizontalalignment = 'center'
+                if text == 'AqR':
+                    horizontalalignment = 'left'
                 ax.axvspan(lower, upper, alpha=0.15, color='indianred')
-                ax.text((upper + lower)/2, ax.get_ylim()[1] * 0.99, text, size=14, color='indianred',
-                        horizontalalignment='center', verticalalignment='top')
+                ax.text((upper + lower)/2, ax.get_ylim()[1] * 0.99, text, size=14, color='indianred', horizontalalignment=horizontalalignment, verticalalignment='top')
 
         box = ax.get_position()
         ax.set_position([box.x0, box.y0,
@@ -999,8 +1001,6 @@ class BayesianDistance(object):
                    'P$_{{\\mathregular{{far}}}}$={}'. format(
                        glon, glat, vlsr, e_vlsr, p_far))
         plt.title(text, fontsize=14, pad=50)
-
-        # ax.text()
 
         ax.set_xlim([0, max_dist])
 
