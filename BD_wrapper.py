@@ -51,6 +51,7 @@ class BayesianDistance(object):
             (None for _ in range(5))
         self.table_format = 'ascii'
         self.save_temporary_files = False
+        self.max_e_vel = 5.0
         self.default_e_vel = 5.0
         self.kda_info_tables = []
         self.exclude_kda_info_tables = []
@@ -347,7 +348,7 @@ class BayesianDistance(object):
 
         if self.colnr_e_vel is not None:
             e_vel = row[self.colnr_e_vel]
-            if abs(float(e_vel)) > 10:  # abs(float(vel)):
+            if abs(float(e_vel)) > self.max_e_vel:  # abs(float(vel)):
                 e_vel = None
 
         if self.version == '1.0':
@@ -769,31 +770,42 @@ class BayesianDistance(object):
         self.table_results.write(self.path_to_table, format=self.table_format,
                                  overwrite=True)
 
-    def choose_distance(self, comps_indices):
+    def choose_distance(self, probabilities, distances, dist_errors):
         """Choose distance from alternative solutions.
 
         Flags for the chosen distance:
         - 0: only 1 distance solution existed
-        - 1: distance solution had the highest probability
-        - 2: distance solutions were tied in their probabilites; chosen distance had the lowest distance error
-        - 3: distance solutions were tied in their probabilites and distance errors; chosen distance is the near distance
+        - 1: only distance solution for which associated Gaussian fit had amplitude above three standard deviations of flat distance probability density
+        - 2: distance solution had the highest probability
+        - 3: distance solutions were tied in their probabilites; chosen distance had the lowest distance error
+        - 4: distance solutions were tied in their probabilites and distance errors; chosen distance is the near distance
+
+        fwhm_factor = 2 * np.sqrt(2 * np.log(2)) = 2.354820045
+
+        Calculate the integrated area of the Gaussian function:
+        area_gauss = amp * fwhm / ((1. / np.sqrt(2*np.pi)) * 2*np.sqrt(2*np.log(2)))
+
+        combining all constants yields a factor of 0.93943727869965132
         """
-        if len(comps_indices) == 1:
+        if len(probabilities) == 1:
             return [], 0
 
-        probabilities = self.table_results['prob'][comps_indices]
-        remove = np.where(probabilities == min(probabilities))[0]
+        #  to get from integrated intensity (= probabilities) and std (= dist_errors) to amplitude
+        amps = probabilities * 0.93943727869965132 / (2.354820045 * dist_errors)
+        remove = np.where(amps < 3 * 0.04)[0]
         if len(remove) == 1:
             return remove, 1
 
-        dist_errors = self.table_results['e_dist'][comps_indices]
-        remove = np.where(dist_errors == max(dist_errors))[0]
+        remove = np.where(probabilities == min(probabilities))[0]
         if len(remove) == 1:
             return remove, 2
 
-        distances = self.table_results['dist'][comps_indices]
+        remove = np.where(dist_errors == max(dist_errors))[0]
+        if len(remove) == 1:
+            return remove, 3
+
         remove = np.argmax(distances)
-        return remove, 3
+        return remove, 4
 
     def get_table_distance_max_probability(self, save=True):
         from tqdm import tqdm
@@ -829,7 +841,11 @@ class BayesianDistance(object):
                 comps_indices = np.append(comps_indices, idx)
 
                 if len(comps_indices) == component:
-                    remove, flag = self.choose_distance(comps_indices)
+                    remove, flag = self.choose_distance(
+                        self.table_results['prob'][comps_indices],
+                        self.table_results['dist'][comps_indices],
+                        self.table_results['e_dist'][comps_indices]
+                        )
                     remove_rows = np.append(remove_rows, comps_indices[remove])
                     choice_flags = np.append(choice_flags, flag)
                     comps_indices = np.array([], dtype='int')
@@ -864,6 +880,20 @@ class BayesianDistance(object):
             return idx[max_idx], arms[max_idx]
         else:
             return idx[max_idx]
+
+    def order_distances(self, results):
+        indices = list(range(len(results)))
+
+        distances = np.array([float(result[1]) for result in results])
+        dist_errors = np.array([float(result[2]) for result in results])
+        probabilities = np.array([float(result[3]) for result in results])
+
+        remove, _ = self.choose_distance(probabilities, distances, dist_errors)
+
+        first_choice = [i for i in indices if i not in remove]
+        choices = first_choice + remove.tolist()
+        results = [results[i] for i in choices]
+        return results
 
     def plot_probability_density(self, source, results, input_file_content,
                                  name=None):
@@ -969,6 +999,8 @@ class BayesianDistance(object):
 
         markers, texts = [], []
 
+        if self.version == '2.4':
+            results = self.order_distances(results)
         for i, result in enumerate(results):
             dist = float(result[1])
             if dist <= 0:
@@ -976,12 +1008,12 @@ class BayesianDistance(object):
             e_dist = float(result[2])
             prob = float(result[3])
             index = 'D$_{{\\mathregular{{{}}}}}$'.format(i + 1)
-            text = '{a}={b:.2f}$\\pm${c:.2f} kpc ({d:.0%})'.format(
+            text = '{a}={b:.1f}$\\pm${c:.1f} kpc ({d:.0%})'.format(
                 a=index, b=dist, c=e_dist, d=prob)
-            marker = ax.scatter(dist, 0)
+            marker = ax.scatter(dist, 0 - i*0.01)
             markers.append(marker)
             texts.append(text)
-            ax.errorbar(dist, 0, xerr=e_dist)
+            ax.errorbar(dist, 0 - i*0.01, xerr=e_dist)
 
         leg2 = ax.legend(
             markers, texts,
