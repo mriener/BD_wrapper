@@ -347,7 +347,7 @@ class BayesianDistance(object):
         e_vel = None
 
         if self.colnr_e_vel is not None:
-            e_vel = row[self.colnr_e_vel]
+            e_vel = max([row[colnr] for colnr in self.colnr_e_vel])
             if abs(float(e_vel)) > self.max_e_vel:  # abs(float(vel)):
                 e_vel = None
 
@@ -570,7 +570,10 @@ class BayesianDistance(object):
         self.colnr_lat = self.input_table.colnames.index(self.colname_lat)
         self.colnr_vel = self.input_table.colnames.index(self.colname_vel)
         if self.colname_e_vel is not None:
-            self.colnr_e_vel = self.input_table.colnames.index(self.colname_e_vel)
+            if not isinstance(self.colname_e_vel, list):
+                self.colname_e_vel = [self.colname_e_vel]
+            self.colnr_e_vel = [self.input_table.colnames.index(colname)
+                                for colname in self.colname_e_vel]
         if self.colname_kda is not None:
             self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
         if self.colname_name is not None:
