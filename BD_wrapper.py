@@ -301,16 +301,16 @@ class BayesianDistance(object):
         results = self._p[self.version]['fct_extract'](
             input_file_content, result_file_content, kin_dist=kinDist, kda_ref=kda_ref)
 
-        if self.save_temporary_files:
-            for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-                src = os.path.join(self.path_to_bde, filename)
-                if name is not None:
-                    filename_new = filename.replace(source, name)
-                dst = os.path.join(
-                    os.path.dirname(self.path_to_output_table), filename_new)
-                copyfile(src, dst)
-
         if self.plot_probability:
+            if self.save_temporary_files:
+                for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
+                    src = os.path.join(self.path_to_bde, filename)
+                    if name is not None:
+                        filename = filename.replace(source, name)
+                    dst = os.path.join(
+                        os.path.dirname(self.path_to_output_table), filename)
+                    copyfile(src, dst)
+
             self.plot_probability_density(
                 source, results, input_file_content, name=name)
 
