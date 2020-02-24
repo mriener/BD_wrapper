@@ -90,6 +90,90 @@ class BayesianDistance(object):
         if self.verbose:
             print(message, end=end)
 
+    def check_settings(self):
+        self.initialize_bdc()
+        self.initialize_table()
+        self.set_probability_controls()
+        if self.check_for_kda_solutions:
+            self.initialize_kda_tables()
+        if self.prior_velocity_dispersion:
+            self.initialize_prior_velocity_dispersion()
+
+        text = 'Python wrapper for Bayesian distance calculator v{}'.format(
+            self.version)
+        border = len(text) * '='
+        heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
+        self.say(heading)
+
+    def initialize_bdc(self):
+        if self.version is None:
+            raise Exception("Need to specify 'version'")
+
+        path_script = os.path.dirname(os.path.realpath(__file__))
+
+        self.path_to_bdc = os.path.join(
+            path_script, 'BDC', 'v' + self.version)
+        path_to_file = os.path.join(
+            self.path_to_bdc, self._p[self.version]['bdc_fortran'])
+
+        with open(path_to_file, "r") as fin:
+            self.bdc_script = fin.readlines()
+
+    def initialize_table(self):
+        if self.path_to_output_table is not None:
+            self.path_to_table = self.path_to_output_table
+
+        if self.path_to_table is None:
+            errorMessage = str("specify 'path_to_table'")
+            raise Exception(errorMessage)
+
+        self.dirname_table = os.path.dirname(self.path_to_table)
+        if len(self.dirname_table) == 0:
+            self.dirname_table = os.getcwd()
+        self.table_file = os.path.basename(self.path_to_table)
+        self.table_filename, self.table_file_extension =\
+            os.path.splitext(self.table_file)
+        if not os.path.exists(self.dirname_table):
+            os.makedirs(self.dirname_table)
+
+    def initialize_kda_tables(self):
+        dirname = os.path.dirname(os.path.realpath(__file__))
+        if not self.kda_info_tables:
+            files = os.listdir(os.path.join(dirname, 'KDA_info'))
+            self.kda_info_tables = [
+                name[:-4] for name in files if name.endswith('.ini')]
+
+        if self.exclude_kda_info_tables:
+            self.kda_info_tables = [
+                table for table in self.kda_info_tables
+                if table not in self.exclude_kda_info_tables]
+
+        self._kda_tables = []
+        keys = ['GLON', 'GLAT', 'VLSR', 'd_VLSR', 'p_far',
+                'cos_pa', 'sin_pa', 'aa', 'bb']
+        for tablename in self.kda_info_tables:
+            table = Table.read(os.path.join(
+                dirname, 'KDA_info', tablename + '.dat'), format='ascii')
+            table = table[keys]
+
+            self._kda_tables.append(table)
+
+    def initialize_prior_velocity_dispersion(self):
+        try:
+            self.beam = self.beam.to(u.rad).value
+        except AttributeError:
+            err_msg = "'beam' needs to be specified as valid astropy unit"
+            raise Exception(err_msg)
+
+        self.kd = KinematicDistance()
+        self.kd.initialize()
+
+        np.random.seed = self.random_seed
+        self._indices = self.size_linewidth_index + np.random.randn(
+            self.sample) * self.size_linewidth_e_index
+        self._sigma_0 = self.size_linewidth_sigma_0 + np.random.randn(
+            self.sample) * self.size_linewidth_e_sigma_0
+
     def set_probability_controls(self):
         s = '      '
 
@@ -135,6 +219,23 @@ class BayesianDistance(object):
             string += 'prob_pm: {}\n'.format(self.prob_pm)
         self.say("setting probability controls to the following values:")
         self.say(string)
+
+    def determine_column_indices(self):
+        self.colnr_lon = self.input_table.colnames.index(self.colname_lon)
+        self.colnr_lat = self.input_table.colnames.index(self.colname_lat)
+        self.colnr_vel = self.input_table.colnames.index(self.colname_vel)
+        if self.colname_e_vel is not None:
+            if not isinstance(self.colname_e_vel, list):
+                self.colname_e_vel = [self.colname_e_vel]
+            self.colnr_e_vel = [self.input_table.colnames.index(colname)
+                                for colname in self.colname_e_vel]
+        if self.colname_kda is not None:
+            self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
+        if self.colname_vel_disp is not None:
+            self.colnr_vel_disp = self.input_table.colnames.index(
+                self.colname_vel_disp)
+        if self.colname_name is not None:
+            self.colnr_name = self.input_table.colnames.index(self.colname_name)
 
     def make_fortran_out(self, source):
         """Create a fortran executable for the source.
@@ -635,23 +736,6 @@ class BayesianDistance(object):
 
         return round(float(p_far), 2), ref
 
-    def determine_column_indices(self):
-        self.colnr_lon = self.input_table.colnames.index(self.colname_lon)
-        self.colnr_lat = self.input_table.colnames.index(self.colname_lat)
-        self.colnr_vel = self.input_table.colnames.index(self.colname_vel)
-        if self.colname_e_vel is not None:
-            if not isinstance(self.colname_e_vel, list):
-                self.colname_e_vel = [self.colname_e_vel]
-            self.colnr_e_vel = [self.input_table.colnames.index(colname)
-                                for colname in self.colname_e_vel]
-        if self.colname_kda is not None:
-            self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
-        if self.colname_vel_disp is not None:
-            self.colnr_vel_disp = self.input_table.colnames.index(
-                self.colname_vel_disp)
-        if self.colname_name is not None:
-            self.colnr_name = self.input_table.colnames.index(self.colname_name)
-
     def get_cartesian_coords(self, lon, lat, dist):
         from astropy.coordinates import SkyCoord
         from astropy import units as u
@@ -728,90 +812,6 @@ class BayesianDistance(object):
             dist_los = dist_los * np.cos(glat)
         R_0 = self._p[self.version]['R_0']
         return np.sqrt(R_0**2 + dist_los**2 - 2*R_0*dist_los*np.cos(glon))
-
-    def check_settings(self):
-        self.initialize_bdc()
-        self.initialize_table()
-        self.set_probability_controls()
-        if self.check_for_kda_solutions:
-            self.initialize_kda_tables()
-        if self.prior_velocity_dispersion:
-            self.initialize_prior_velocity_dispersion()
-
-        text = 'Python wrapper for Bayesian distance calculator v{}'.format(
-            self.version)
-        border = len(text) * '='
-        heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
-        self.say(heading)
-
-    def initialize_bdc(self):
-        if self.version is None:
-            raise Exception("Need to specify 'version'")
-
-        path_script = os.path.dirname(os.path.realpath(__file__))
-
-        self.path_to_bdc = os.path.join(
-            path_script, 'BDC', 'v' + self.version)
-        path_to_file = os.path.join(
-            self.path_to_bdc, self._p[self.version]['bdc_fortran'])
-
-        with open(path_to_file, "r") as fin:
-            self.bdc_script = fin.readlines()
-
-    def initialize_table(self):
-        if self.path_to_output_table is not None:
-            self.path_to_table = self.path_to_output_table
-
-        if self.path_to_table is None:
-            errorMessage = str("specify 'path_to_table'")
-            raise Exception(errorMessage)
-
-        self.dirname_table = os.path.dirname(self.path_to_table)
-        if len(self.dirname_table) == 0:
-            self.dirname_table = os.getcwd()
-        self.table_file = os.path.basename(self.path_to_table)
-        self.table_filename, self.table_file_extension =\
-            os.path.splitext(self.table_file)
-        if not os.path.exists(self.dirname_table):
-            os.makedirs(self.dirname_table)
-
-    def initialize_kda_tables(self):
-        dirname = os.path.dirname(os.path.realpath(__file__))
-        if not self.kda_info_tables:
-            files = os.listdir(os.path.join(dirname, 'KDA_info'))
-            self.kda_info_tables = [
-                name[:-4] for name in files if name.endswith('.ini')]
-
-        if self.exclude_kda_info_tables:
-            self.kda_info_tables = [
-                table for table in self.kda_info_tables
-                if table not in self.exclude_kda_info_tables]
-
-        self._kda_tables = []
-        keys = ['GLON', 'GLAT', 'VLSR', 'd_VLSR', 'p_far',
-                'cos_pa', 'sin_pa', 'aa', 'bb']
-        for tablename in self.kda_info_tables:
-            table = Table.read(os.path.join(
-                dirname, 'KDA_info', tablename + '.dat'), format='ascii')
-            table = table[keys]
-
-            self._kda_tables.append(table)
-
-    def initialize_prior_velocity_dispersion(self):
-        try:
-            self.beam = self.beam.to(u.rad).value
-        except AttributeError:
-            err_msg = "'beam' needs to be specified as valid astropy unit"
-            raise Exception(err_msg)
-
-        self.kd = KinematicDistance()
-        self.kd.initialize()
-
-        np.random.seed = self.random_seed
-        self._indices = self.size_linewidth_index + np.random.randn(
-            self.sample) * self.size_linewidth_e_index
-        self._sigma_0 = self.size_linewidth_sigma_0 + np.random.randn(
-            self.sample) * self.size_linewidth_e_sigma_0
 
     def create_astropy_table(self, results):
         self.say('creating Astropy table...')
