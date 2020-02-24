@@ -6,8 +6,11 @@ import warnings
 import numpy as np
 from shutil import copyfile
 
+from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table, Column
+
+from .kinematic_distance import KinematicDistance
 
 
 class BayesianDistance(object):
@@ -17,9 +20,9 @@ class BayesianDistance(object):
 
         Parameters
         ----------
-        path_to_bde : file path to the Bayesian distance program
-        bde_script : read in fortran script of the Bayesian distance
-            estimator
+        path_to_bdc : file path to the Bayesian distance program
+        bdc_script : read in fortran script of the Bayesian distance
+            calculator
         path_to_file : file path to weighted FITS cube containing information
             about the decomposed Gaussians
         path_to_table : file path of the astropy table which contains the
@@ -31,7 +34,7 @@ class BayesianDistance(object):
         verbose : The default is 'True'. Prints status messages to the
             terminal.
         """
-        self.path_to_bde = None
+        self.path_to_bdc = None
         self.version = '2.4'
         self.path_to_file = None
         self.path_to_input_table = None
@@ -41,12 +44,13 @@ class BayesianDistance(object):
         self.add_kinematic_distance = True
         self.add_galactocentric_distance = True
         self.check_for_kda_solutions = True
+        self.prior_velocity_dispersion = False
         self.colname_lon, self.colname_lat, self.colname_vel,\
-            self.colname_e_vel, self.colname_kda, self.colname_name = (
-                None for i in range(6))
+            self.colname_e_vel, self.colname_kda, self.colname_name,\
+            self.colname_vel_disp = (None for i in range(7))
         self.colnr_lon, self.colnr_lat, self.colnr_vel,\
-            self.colnr_e_vel, self.colnr_kda, self.colnr_name = (
-                None for i in range(6))
+            self.colnr_e_vel, self.colnr_kda, self.colnr_name,\
+            self.colnr_vel_disp = (None for i in range(7))
         self.prob_sa, self.prob_kd, self.prob_gl, self.prob_ps, self.prob_pm =\
             (None for _ in range(5))
         self.table_format = 'ascii'
@@ -56,6 +60,14 @@ class BayesianDistance(object):
         self.kda_info_tables = []
         self.exclude_kda_info_tables = []
         self.kda_weight = 1
+
+        self.random_seed = 177
+        self.sample = 1000
+        self.beam = None
+        self.size_linewidth_index = 0.5
+        self.size_linewidth_e_index = 0.1
+        self.size_linewidth_sigma_0 = 0.7
+        self.size_linewidth_e_sigma_0 = 0.1
 
         self.use_ncpus = None
         self.plot_probability = False
@@ -98,13 +110,13 @@ class BayesianDistance(object):
             self.prob_pm = default_vals[self.version]['PM']
 
         cwd = os.getcwd()
-        os.chdir(self.path_to_bde)
+        os.chdir(self.path_to_bdc)
 
         with open(os.path.join(
-                self.path_to_bde, 'probability_controls.inp'), 'r') as fin:
+                self.path_to_bdc, 'probability_controls.inp'), 'r') as fin:
             file_content = fin.readlines()
         with open(os.path.join(
-                self.path_to_bde, 'probability_controls.inp'), 'w') as fout:
+                self.path_to_bdc, 'probability_controls.inp'), 'w') as fout:
             for line in file_content:
                 if not line.startswith('!'):
                     line = '{s}{a}{s}{b}{s}{c}{s}{d}'.format(
@@ -115,15 +127,24 @@ class BayesianDistance(object):
                 fout.write(line)
         os.chdir(cwd)
 
+        string = str("prob_sa: {a}\nprob_kd: {b}\n"
+                     "prob_gl: {c}\nprob_ps: {d}\n".format(
+                         a=self.prob_sa, b=self.prob_kd, c=self.prob_gl,
+                         d=self.prob_ps))
+        if self.version == '2.4':
+            string += 'prob_pm: {}\n'.format(self.prob_pm)
+        self.say("setting probability controls to the following values:")
+        self.say(string)
+
     def make_fortran_out(self, source):
         """Create a fortran executable for the source.
 
         Replaces the default input file in the fortran script of the Bayesian
-        distance estimator with the input file of the source, then creates a
+        distance calculator with the input file of the source, then creates a
         Fortran executable file.
         """
         with open("{}.f".format(self.path_to_source), "w") as fout:
-            for line in self.bde_script:
+            for line in self.bdc_script:
                 fout.write(line.replace('sources_info.inp',
                                         '{}_sources_info.inp'.format(source)))
         os.system('gfortran {}.f -o {}.out'.format(
@@ -160,7 +181,7 @@ class BayesianDistance(object):
     def extract_probability_info(self, line, lon, lat, p_far):
         """
         Extract the distance results from the corresponding string in
-        the output file of the Bayesian distance estimator tool.
+        the output file of the Bayesian distance calculator tool.
         """
         deleteString = self.extract_string(
                 line, 'Probability component', ':', incl=True)
@@ -178,12 +199,12 @@ class BayesianDistance(object):
                              kin_dist=None, kda_ref=None):
         """
         Loop through the lines of the output file of the Bayesian distance
-        estimator tool and search for the distance results.
+        calculator tool and search for the distance results.
 
         Parameters
         ----------
         result_file_content : List containing read-in lines of the output file
-            ({source_name}.prt) of the Bayesian distance estimator tool
+            ({source_name}.prt) of the Bayesian distance calculator tool
         """
         results = []
         flag = False
@@ -226,7 +247,7 @@ class BayesianDistance(object):
     def extract_kinematic_info(self, line):
         """
         Extract the distance results from the corresponding string in
-        the output file of the Bayesian distance estimator tool.
+        the output file of the Bayesian distance calculator tool.
         """
         line = line.replace('Kinematic distance(s):', '')
         line = line.replace('\n', '')
@@ -269,30 +290,30 @@ class BayesianDistance(object):
         return results
 
     def delete_all_temporary_files(self, source):
-        for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-            os.remove(os.path.join(self.path_to_bde, filename))
+        for filename in [f for f in os.listdir(self.path_to_bdc) if f.startswith(source)]:
+            os.remove(os.path.join(self.path_to_bdc, filename))
 
     def get_results(self, source, kda_ref=None, name=None):
         """
         Extract the distance results from the output file ({source_name}.prt)
-        of the Bayesian distance estimator tool.
+        of the Bayesian distance calculator tool.
         """
         suffix = self._p[self.version]['summary_suffix']
-        for filename in [f for f in os.listdir(self.path_to_bde)
+        for filename in [f for f in os.listdir(self.path_to_bdc)
                          if f.startswith(source) and f.endswith(suffix)]:
-            with open(os.path.join(self.path_to_bde, filename), 'r') as fin:
+            with open(os.path.join(self.path_to_bdc, filename), 'r') as fin:
                 result_file_content = fin.readlines()
 
-        for filename in [f for f in os.listdir(self.path_to_bde)
+        for filename in [f for f in os.listdir(self.path_to_bdc)
                          if f.startswith(source) and f.endswith("info.inp")]:
-            with open(os.path.join(self.path_to_bde, filename), 'r') as fin:
+            with open(os.path.join(self.path_to_bdc, filename), 'r') as fin:
                 input_file_content = fin.readlines()
 
         if self.add_kinematic_distance:
             if self.version == '1.0':
                 kd_content = result_file_content.copy()
             elif self.version == '2.4':
-                with open(os.path.join(self.path_to_bde, source + '.prt'), 'r') as fin:
+                with open(os.path.join(self.path_to_bdc, source + '.prt'), 'r') as fin:
                     kd_content = fin.readlines()
             kinDist = self.extract_kinematic_distances(kd_content)
         else:
@@ -303,8 +324,8 @@ class BayesianDistance(object):
 
         if self.plot_probability:
             if self.save_temporary_files:
-                for filename in [f for f in os.listdir(self.path_to_bde) if f.startswith(source)]:
-                    src = os.path.join(self.path_to_bde, filename)
+                for filename in [f for f in os.listdir(self.path_to_bdc) if f.startswith(source)]:
+                    src = os.path.join(self.path_to_bdc, filename)
                     if name is not None:
                         filename = filename.replace(source, name)
                     dst = os.path.join(
@@ -319,22 +340,22 @@ class BayesianDistance(object):
         return results
 
     def run_bdc_script(self, source, input_string):
-        self.path_to_source = os.path.join(self.path_to_bde, source)
+        self.path_to_source = os.path.join(self.path_to_bdc, source)
         filepath = '{}_sources_info.inp'.format(self.path_to_source)
         with open(filepath, 'w') as fin:
             fin.write(input_string)
         self.make_fortran_out(source)
         cwd = os.getcwd()
-        os.chdir(self.path_to_bde)
+        os.chdir(self.path_to_bdc)
         os.system('./{}.out'.format(source))
         os.chdir(cwd)
 
     def bdc_calculation_ok(self, source):
         """Check if BDC yielded any distance results."""
         suffix = self._p[self.version]['summary_suffix']
-        for filename in [f for f in os.listdir(self.path_to_bde)
+        for filename in [f for f in os.listdir(self.path_to_bdc)
                          if f.startswith(source) and f.endswith(suffix)]:
-            with open(os.path.join(self.path_to_bde, filename), 'r') as fin:
+            with open(os.path.join(self.path_to_bdc, filename), 'r') as fin:
                 result_file_content = fin.readlines()
         for line in result_file_content:
             if not line.startswith('!'):
@@ -379,7 +400,50 @@ class BayesianDistance(object):
         elif self.check_for_kda_solutions:
             p_far, kda_ref = self.check_KDA(lon, lat, vel)
 
-        return p_far, kda_ref
+        return round(p_far, 2), kda_ref
+
+    def get_expected_vel_disp(self, distance):
+        size = self.beam * distance * 1e3
+        sigma_exp = self._sigma_0 * (size)**(self._indices)
+        return np.mean(sigma_exp), np.std(sigma_exp)
+
+    def normalized_gauss(self, mean, sigma, x):
+        return np.exp(-0.5 * ((x - mean) / sigma)**2)
+
+    def check_limit(self, mean, sigma, vel_disp, prob, limit=0.01):
+        limit_prob = None
+        if prob < limit:
+            if (vel_disp - mean) > 0:
+                limit_prob = 'higher'
+            else:
+                limit_prob = 'lower'
+        return limit_prob
+
+    def determine_pfar_from_vel_disp(self, dist_n, dist_f, vel_disp):
+        sigma_exp_mean, sigma_exp_std = self.get_expected_vel_disp(dist_n)
+        prob_near = self.normalized_gauss(
+            sigma_exp_mean, sigma_exp_std, vel_disp)
+        limit_n = self.check_limit(
+            sigma_exp_mean, sigma_exp_std, vel_disp, prob_near)
+
+        sigma_exp_mean, sigma_exp_std = self.get_expected_vel_disp(dist_f)
+        prob_far = self.normalized_gauss(
+            sigma_exp_mean, sigma_exp_std, vel_disp)
+        limit_f = self.check_limit(
+            sigma_exp_mean, sigma_exp_std, vel_disp, prob_far)
+
+        if (limit_f == 'lower') and (limit_n != 'higher'):
+            pfar = 0
+        else:
+            pfar = (-prob_near + prob_far) * 0.5 + 0.5
+
+        return pfar
+
+    def determine_p_far_from_velocity_dispersion(self, row, lon, lat, vel):
+        dist_n, dist_f = self.kd.calc_kinematic_distance(lon, lat, vel)
+        vel_disp = row[self.colnr_vel_disp]
+        p_far = self.determine_pfar_from_vel_disp(dist_n, dist_f, vel_disp)
+        return round(p_far, 2)
 
     def determine(self, row, idx):
         """Determine distance of lbv data point via the BDC."""
@@ -395,6 +459,12 @@ class BayesianDistance(object):
 
         plusminus = self.determine_e_vel(row)
         p_far, kda_ref = self.determine_p_far_and_kda_ref(row, lon, lat, vel)
+        condition = ((p_far == 0.5) and
+                     self.prior_velocity_dispersion and
+                     (self.colnr_vel_disp is not None))
+        if condition:
+            p_far = self.determine_p_far_from_velocity_dispersion(
+                row, lon, lat, vel)
 
         input_string = "{a}\t{b}\t{c}\t{d}\t{e}{f}\t-\n".format(
             a=source, b=lon, c=lat, d=vel, e=plusminus, f=p_far)
@@ -576,6 +646,9 @@ class BayesianDistance(object):
                                 for colname in self.colname_e_vel]
         if self.colname_kda is not None:
             self.colnr_kda = self.input_table.colnames.index(self.colname_kda)
+        if self.colname_vel_disp is not None:
+            self.colnr_vel_disp = self.input_table.colnames.index(
+                self.colname_vel_disp)
         if self.colname_name is not None:
             self.colnr_name = self.input_table.colnames.index(self.colname_name)
 
@@ -596,18 +669,6 @@ class BayesianDistance(object):
 
     def calculate_distances(self):
         self.check_settings()
-
-        self.set_probability_controls()
-
-        string = str("prob_sa: {a}\nprob_kd: {b}\n"
-                     "prob_gl: {c}\nprob_ps: {d}\n".format(
-                         a=self.prob_sa, b=self.prob_kd, c=self.prob_gl,
-                         d=self.prob_ps))
-        if self.version == '2.4':
-            string += 'prob_pm: {}\n'.format(self.prob_pm)
-        self.say("setting probability controls to the following values:")
-        self.say(string)
-
         self.say('calculating Bayesian distance...')
 
         if self.input_table is None:
@@ -616,6 +677,12 @@ class BayesianDistance(object):
             #  TESTING:
             # self.input_table = self.input_table[62000:62001]
         self.determine_column_indices()
+
+        condition = (self.prior_velocity_dispersion and
+                     (self.colnr_vel_disp is None))
+        if condition:
+            self.colnr_vel_disp = False
+            warnings.warn(str("Did not specify 'colnr_vel_disp' or 'colname_vel_disp'. Setting 'prior_velocity_dispersion=False'."))
 
         import BD_wrapper.BD_multiprocessing as BD_multiprocessing
         BD_multiprocessing.init([self, self.input_table])
@@ -663,29 +730,35 @@ class BayesianDistance(object):
         return np.sqrt(R_0**2 + dist_los**2 - 2*R_0*dist_los*np.cos(glon))
 
     def check_settings(self):
-        if (self.path_to_bde is None) and (self.version is None):
-            raise Exception("Need to specify 'path_to_bde' or 'version'")
+        self.initialize_bdc()
+        self.initialize_table()
+        self.set_probability_controls()
+        if self.check_for_kda_solutions:
+            self.initialize_kda_tables()
+        if self.prior_velocity_dispersion:
+            self.initialize_prior_velocity_dispersion()
+
+        text = 'Python wrapper for Bayesian distance calculator v{}'.format(
+            self.version)
+        border = len(text) * '='
+        heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
+        self.say(heading)
+
+    def initialize_bdc(self):
+        if self.version is None:
+            raise Exception("Need to specify 'version'")
 
         path_script = os.path.dirname(os.path.realpath(__file__))
 
-        if self.version is None:
-            path_to_file = os.path.join(
-                    self.path_to_bde, "Bayesian_distance_v1.0.f")
-            if not os.path.exists(path_to_file):
-                path_to_file = os.path.join(
-                        self.path_to_bde, "Bayesian_distance_2019_fromlist_v2.4.f")
-            self.version = self.extract_string(
-                os.path.basename(path_to_file), '_v', '.f')
-        else:
-            self.path_to_bde = os.path.join(
-                path_script, 'BDC', 'v' + self.version)
-            path_to_file = os.path.join(
-                self.path_to_bde, self._p[self.version]['bdc_fortran'])
+        self.path_to_bdc = os.path.join(
+            path_script, 'BDC', 'v' + self.version)
+        path_to_file = os.path.join(
+            self.path_to_bdc, self._p[self.version]['bdc_fortran'])
 
         with open(path_to_file, "r") as fin:
-            bde_script = fin.readlines()
-        self.bde_script = bde_script
+            self.bdc_script = fin.readlines()
 
+    def initialize_table(self):
         if self.path_to_output_table is not None:
             self.path_to_table = self.path_to_output_table
 
@@ -693,6 +766,16 @@ class BayesianDistance(object):
             errorMessage = str("specify 'path_to_table'")
             raise Exception(errorMessage)
 
+        self.dirname_table = os.path.dirname(self.path_to_table)
+        if len(self.dirname_table) == 0:
+            self.dirname_table = os.getcwd()
+        self.table_file = os.path.basename(self.path_to_table)
+        self.table_filename, self.table_file_extension =\
+            os.path.splitext(self.table_file)
+        if not os.path.exists(self.dirname_table):
+            os.makedirs(self.dirname_table)
+
+    def initialize_kda_tables(self):
         dirname = os.path.dirname(os.path.realpath(__file__))
         if not self.kda_info_tables:
             files = os.listdir(os.path.join(dirname, 'KDA_info'))
@@ -714,20 +797,21 @@ class BayesianDistance(object):
 
             self._kda_tables.append(table)
 
-        self.dirname_table = os.path.dirname(self.path_to_table)
-        if len(self.dirname_table) == 0:
-            self.dirname_table = os.getcwd()
-        self.table_file = os.path.basename(self.path_to_table)
-        self.table_filename, self.table_file_extension =\
-            os.path.splitext(self.table_file)
-        if not os.path.exists(self.dirname_table):
-            os.makedirs(self.dirname_table)
+    def initialize_prior_velocity_dispersion(self):
+        try:
+            self.beam = self.beam.to(u.rad).value
+        except AttributeError:
+            err_msg = "'beam' needs to be specified as valid astropy unit"
+            raise Exception(err_msg)
 
-        text = 'Python wrapper for Bayesian distance calculator v{}'.format(
-            self.version)
-        border = len(text) * '='
-        heading = '\n{a}\n{b}\n{a}\n'.format(a=border, b=text)
-        self.say(heading)
+        self.kd = KinematicDistance()
+        self.kd.initialize()
+
+        np.random.seed = self.random_seed
+        self._indices = self.size_linewidth_index + np.random.randn(
+            self.sample) * self.size_linewidth_e_index
+        self._sigma_0 = self.size_linewidth_sigma_0 + np.random.randn(
+            self.sample) * self.size_linewidth_e_sigma_0
 
     def create_astropy_table(self, results):
         self.say('creating Astropy table...')
@@ -911,30 +995,30 @@ class BayesianDistance(object):
                 return max_dist
 
         distKD, probKD = np.loadtxt(
-            os.path.join(self.path_to_bde, '{}_kinematic_distance_pdf.dat'.format(source)),
+            os.path.join(self.path_to_bdc, '{}_kinematic_distance_pdf.dat'.format(source)),
             usecols=(0, 1), skiprows=2, unpack=True)
 
         if self.version == '1.0':
             distGL, probGL = np.loadtxt(
-                os.path.join(self.path_to_bde, '{}_latitude_pdf.dat'.format(source)),
+                os.path.join(self.path_to_bdc, '{}_latitude_pdf.dat'.format(source)),
                 usecols=(0, 1), skiprows=2, unpack=True)
 
             distSA, probSA = np.loadtxt(
-                os.path.join(self.path_to_bde, '{}_spiral_arm_pdf.dat'.format(source)),
+                os.path.join(self.path_to_bdc, '{}_spiral_arm_pdf.dat'.format(source)),
                 usecols=(0, 1), skiprows=2, unpack=True)
         elif self.version == '2.4':
             distSA, probSA = np.loadtxt(
-                os.path.join(self.path_to_bde, '{}_arm_latitude_pdf.dat'.format(source)),
+                os.path.join(self.path_to_bdc, '{}_arm_latitude_pdf.dat'.format(source)),
                 usecols=(0, 1), skiprows=2, unpack=True)
 
             distGL, probGL = distSA, probSA
 
         arm_ranges_lower, arm_ranges_upper = np.loadtxt(
-            os.path.join(self.path_to_bde, '{}_arm_ranges.dat'.format(source)),
+            os.path.join(self.path_to_bdc, '{}_arm_ranges.dat'.format(source)),
             usecols=(0, 1), skiprows=2, unpack=True)
 
         spiral_arms = np.genfromtxt(
-            os.path.join(self.path_to_bde, '{}_arm_ranges.dat'.format(source)),
+            os.path.join(self.path_to_bdc, '{}_arm_ranges.dat'.format(source)),
             skip_header=2, usecols=2, dtype='str')
 
         skip_spiral_arm_ranges = False
@@ -950,11 +1034,11 @@ class BayesianDistance(object):
             skip_spiral_arm_ranges = True
 
         distPS, probPS = np.loadtxt(
-            os.path.join(self.path_to_bde, '{}_parallaxes_pdf.dat'.format(source)),
+            os.path.join(self.path_to_bdc, '{}_parallaxes_pdf.dat'.format(source)),
             usecols=(0, 1), skiprows=2, unpack=True)
 
         distFD, probFD = np.loadtxt(
-            os.path.join(self.path_to_bde, '{}_final_distance_pdf.dat'.format(source)),
+            os.path.join(self.path_to_bdc, '{}_final_distance_pdf.dat'.format(source)),
             usecols=(0, 1), skiprows=2, unpack=True)
 
         max_dist = 0
