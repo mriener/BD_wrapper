@@ -784,7 +784,7 @@ class BayesianDistance(object):
 
         if self.save_temporary_files:
             filepath = os.path.join(
-                os.path.dirname(self.path_to_input_table),
+                os.path.dirname(self.path_to_table),
                 '_bdc_results_list.pickle')
             with open(filepath, 'wb') as p_file:
                 pickle.dump(results_list, p_file)
