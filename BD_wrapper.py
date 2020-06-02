@@ -877,6 +877,12 @@ class BayesianDistance(object):
         if len(probabilities) == 1:
             return [], 0
 
+        #  check if one of the components had a probability of 1; this implies
+        #  that the remaining components have a probability of zero. This can #  happen as v2.4 of the BDC by default always returns two components
+        if 1 in probabilities:
+            remove = np.where(probabilities != 1)[0]
+            return remove, 0
+
         #  to get from integrated intensity (= probabilities) and std (= dist_errors) to amplitude
         amps = probabilities * 0.93943727869965132 / (2.354820045 * dist_errors)
         remove = np.where(amps < 3 * 0.04)[0]
