@@ -109,7 +109,8 @@ class BayesianDistance(object):
         if self.version is None:
             raise Exception("Need to specify 'version'")
 
-        path_script = os.path.dirname(os.path.realpath(__file__))
+        path_script = os.path.dirname(
+            os.path.dirname(os.path.realpath(__file__)))
 
         self.path_to_bdc = os.path.join(
             path_script, 'BDC', 'v' + self.version)
@@ -137,7 +138,8 @@ class BayesianDistance(object):
             os.makedirs(self.dirname_table)
 
     def initialize_kda_tables(self):
-        dirname = os.path.dirname(os.path.realpath(__file__))
+        dirname = os.path.dirname(
+            os.path.dirname(os.path.realpath(__file__)))
         if not self.kda_info_tables:
             files = os.listdir(os.path.join(dirname, 'KDA_info'))
             self.kda_info_tables = [
@@ -705,7 +707,8 @@ class BayesianDistance(object):
 
     def check_KDA(self, lon, lat, vel):
         weights_kda, refs = np.array([]), []
-        dirname = os.path.dirname(os.path.realpath(__file__))
+        dirname = os.path.dirname(
+            os.path.dirname(os.path.realpath(__file__)))
 
         for table, tablename in zip(self._kda_tables, self.kda_info_tables):
             path_to_ini = os.path.join(dirname, 'KDA_info', tablename + '.ini')

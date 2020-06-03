@@ -59,7 +59,7 @@ class TestBayesianDistance(unittest.TestCase):
         bdc.get_table_distance_max_probability(save=False)
 
         for i, (value, flag) in enumerate(zip(
-                np.arange(1, 10, 1), [0, 1, 1, 2, 2, 3, 3, 4, 4])):
+                np.arange(1, 11, 1), [0, 1, 1, 2, 2, 3, 3, 4, 4, 0])):
             self.assertEqual(bdc.table_results['dist'][i], value)
             self.assertEqual(bdc.table_results['flag'][i], flag)
 

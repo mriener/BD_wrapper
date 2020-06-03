@@ -15,7 +15,8 @@ class KinematicDistance(object):
         self.rotation_curve_parameters()
 
     def rotation_curve_parameters(self):
-        dirname = os.path.dirname(os.path.realpath(__file__))
+        dirname = os.path.dirname(
+            os.path.dirname(os.path.realpath(__file__)))
         path_to_file = os.path.join(
             dirname, 'BDC', 'v' + self.bdc_version, 'galaxy_data_Univ.inp')
 
