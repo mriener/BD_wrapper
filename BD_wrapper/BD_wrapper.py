@@ -21,22 +21,13 @@ class BayesianDistance(object):
         Parameters
         ----------
         path_to_bdc : file path to the Bayesian distance program
-        bdc_script : read in fortran script of the Bayesian distance
-            calculator
-        path_to_file : file path to weighted FITS cube containing information
-            about the decomposed Gaussians
-        path_to_table : file path of the astropy table which contains the
-            distance results
         path_to_input_table : file path of a table containing information of the
             Gaussian decompositions
-        input_table : table containing information of the Gaussian
-            decompositions
         verbose : The default is 'True'. Prints status messages to the
             terminal.
         """
         self.path_to_bdc = None
         self.version = '2.4'
-        self.path_to_file = None
         self.path_to_input_table = None
         self.path_to_output_table = None
         self.input_table = None
@@ -125,7 +116,7 @@ class BayesianDistance(object):
             self.path_to_table = self.path_to_output_table
 
         if self.path_to_table is None:
-            errorMessage = str("specify 'path_to_table'")
+            errorMessage = str("specify 'path_to_output_table'")
             raise Exception(errorMessage)
 
         self.dirname_table = os.path.dirname(self.path_to_table)
@@ -760,7 +751,7 @@ class BayesianDistance(object):
 
         if self.input_table is None:
             self.input_table = Table.read(
-                self.path_to_input_table, format='ascii')
+                self.path_to_input_table, format=self.table_format)
             #  TESTING:
             # self.input_table = self.input_table[62000:62001]
         self.determine_column_indices()
@@ -771,7 +762,7 @@ class BayesianDistance(object):
             self.colnr_vel_disp = False
             warnings.warn(str("Did not specify 'colnr_vel_disp' or 'colname_vel_disp'. Setting 'prior_velocity_dispersion=False'."))
 
-        import BD_wrapper.BD_multiprocessing as BD_multiprocessing
+        from . import BD_multiprocessing
         BD_multiprocessing.init([self, self.input_table])
         results_list = BD_multiprocessing.func(use_ncpus=self.use_ncpus)
         print('SUCCESS\n')
