@@ -1,4 +1,3 @@
-import itertools
 import os
 import pickle
 import warnings
@@ -7,7 +6,6 @@ import numpy as np
 from shutil import copyfile
 
 from astropy import units as u
-from astropy.io import fits
 from astropy.table import Table, Column
 
 from .kinematic_distance import KinematicDistance
