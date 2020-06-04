@@ -16,7 +16,7 @@ For tips on how to get started with the ``BD_wrapper`` see the section [Getting 
 
 ### Version
 
-The currently recommended version of the ``BD_wrapper`` is v0.1 (stable version released on XXXX-XX-XX). See the [BD_wrapper Changelog](CHANGES.md) for an overview of the major changes and improvements introduced by newer versions currently in development.
+The currently recommended version of the ``BD_wrapper`` is v0.1. See the [BD_wrapper Changelog](CHANGES.md) for an overview of the major changes and improvements introduced by newer versions currently in development.
 
 New updates to the code are first tested and developed in the ``dev`` branch. Users cloning the ``dev`` branch should beware that these versions are not guaranteed to be stable.
 
@@ -75,6 +75,8 @@ The notebook [Parameter_settings.ipynb](tutorials/Parameter_settings.ipynb) give
 The [Tutorial-batch_distance_estimation.ipynb](tutorials/Tutorial-batch_distance_estimation.ipynb) notebook guides users through the process of using the `BD_wrapper` to estimate distances for a large table of input sources.
 
 The [Tutorial-plot_distance_pdf.ipynb](tutorials/Tutorial-plot_distance_pdf.ipynb) notebook shows how to plot the distance probability density results obtained by the BDC and how to retain temporary files that can be important for debugging and obtaining diagnostics of the distance calculation.
+
+The ``BD_wrapper`` uses literature distance results to inform the P_far prior that helps resolve the kinematic distance ambiguity (KDA). The ``BD_wrapper`` currently contains twelve catalogues (called KDA info tables) that mostly cover regions in the first Galactic quadrant. In the [Example-KDA_info_table.ipynb](tutorials/Example-KDA_info_table.ipynb) we show how to easily create a new KDA info table for a catalogue that is not yet included in the `KDA_info` directory.
 
 ## Citing the BD_wrapper
 
