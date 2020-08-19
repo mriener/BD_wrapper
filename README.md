@@ -8,7 +8,7 @@ The ``BD_wrapper`` provides a Python implementation for bulk distance assignment
 
 For a detailed description about the new priors and results of tests performed with the ``BD_wrapper`` on decomposition results from the Galactic Ring Survey ([Riener et al. 2020a](https://ui.adsabs.harvard.edu/abs/2020A%26A...633A..14R/abstract)) please see:
 
-Riener et al. 2020b (in prep.)
+[Riener et al. 2020b](https://ui.adsabs.harvard.edu/abs/2020A%26A...640A..72R/abstract)
 
 All credit for the (BDC) and its original Fortran implementation is due to [Reid et al. 2016](https://ui.adsabs.harvard.edu/abs/2016ApJ...823...77R/abstract) and [Reid et al. 2019](https://ui.adsabs.harvard.edu/abs/2019ApJ...885..131R/abstract) and should be acknowledged as such.
 
@@ -83,6 +83,25 @@ The ``BD_wrapper`` uses literature distance results to inform the P_far prior th
 If you make use of this package in a publication, please consider the following acknowledgements:
 
 ```
+@ARTICLE{Riener2020A&A...640A..72R,
+       author = {{Riener}, M. and {Kainulainen}, J. and {Henshaw}, J.~D. and
+         {Beuther}, H.},
+        title = "{Autonomous Gaussian decomposition of the Galactic Ring Survey. II. The Galactic distribution of $^{13}$CO}",
+      journal = {\aap},
+     keywords = {methods: data analysis, radio lines: ISM, ISM: kinematics and dynamics, ISM: lines and bands, Galaxy: structure, Galaxy: kinematics and dynamics, Astrophysics - Astrophysics of Galaxies},
+         year = 2020,
+        month = aug,
+       volume = {640},
+          eid = {A72},
+        pages = {A72},
+          doi = {10.1051/0004-6361/202038479},
+archivePrefix = {arXiv},
+       eprint = {2006.03294},
+ primaryClass = {astro-ph.GA},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2020A&A...640A..72R},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+
 @ARTICLE{2019ApJ...885..131R,
        author = {{Reid}, M.~J. and {Menten}, K.~M. and {Brunthaler}, A. and
          {Zheng}, X.~W. and {Dame}, T.~M. and {Xu}, Y. and {Li}, J. and
@@ -135,6 +154,6 @@ Please also consider acknowledgements to the required dependencies in your work.
 
 If you should find that the ``BD_wrapper`` does not perform as intended for your dataset or if you should come across bugs or have suggestions for improvement, please get into contact with us or open a new Issue or Pull request.
 
-## Contributing to GaussPy+
+## Contributing to BD_wrapper
 
 To contribute to the ``BD_wrapper``, see [Contributing to the BD_wrapper](CONTRIBUTING.md)
